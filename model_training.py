@@ -11,23 +11,11 @@ from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 from craft.craft_torch import Craft, torch_to_numpy
+import src.model_utils as mu
+
+import wandb
 
 import numpy as np
-
-class NeuralNetwork(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.flatten = nn.Flatten()
-        self.l1 = nn.Sequential(nn.Linear(28*28*3, 512), nn.ReLU())
-        self.l2 = nn.Sequential(nn.Linear(512, 512), nn.ReLU())
-        self.l3 = nn.Sequential(nn.Linear(512, 10))
-
-    def forward(self, x):
-        x = self.flatten(x)
-        x = self.l1(x)
-        x = self.l2(x)
-        logits = self.l3(x)
-        return logits
 
 
 def train(dataloader, model, loss_fn, optimizer):
@@ -74,24 +62,24 @@ def test(dataloader, model, loss_fn):
     test_loss /= num_batches
     correct /= size
     print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
-    accuracy_matrix = correctness_matrix/appearance_matrix
-    return accuracy_matrix
+    run.log({"acc" : correct, "loss":test_loss})
+    return correctness_matrix, appearance_matrix
 
 
 sys.path.append(os.getcwd())
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--exp_id", type=int, default=0)
-parser.add_argument("--exp_name", type=str, default="MNIST")
+parser.add_argument("--model_id", type=int, default=0)
+parser.add_argument("--model_name", type=str, default="MNIST")
 parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--train_correlation", type=float, default=0.7)
 parser.add_argument("--test_correlation", type=float, default=0.1)
-parser.add_argument("--epochs", type=int, default=50)
+parser.add_argument("--epochs", type=int, default=20)
 
 args = parser.parse_args()
 
-exp_id = args.exp_id
-exp_name = args.exp_name
+model_id = args.model_id
+model_name = args.model_name
 batch_size = args.batch_size
 train_correlation = args.train_correlation
 test_correlation = args.test_correlation
@@ -100,11 +88,11 @@ epochs = args.epochs
 result_path = "models/"
 if not os.path.exists(result_path):
     os.mkdir(result_path)
-result_path += exp_name + "/"
+result_path += model_name + "/"
 if not os.path.exists(result_path):
     os.mkdir(result_path)
 
-result_path += f"experiment_{exp_id}.pkl"
+result_path += f"model_{model_id}.pkl"
 if os.path.exists(result_path):
     with open(result_path, "rb") as f:
         parameters = pkl.load(f)
@@ -114,43 +102,51 @@ if os.path.exists(result_path):
     epochs = parameters["epochs"]
 else:
     parameters = {
-        "exp_id":exp_id,
-        "exp_name":exp_name,
+        "model_id":model_id,
+        "model_name":model_name,
         "batch_size":batch_size,
         "train_correlation":train_correlation,
         "test_correlation":test_correlation,
         "epochs":epochs,
     }
 
-if os.path.exists(f"models/{exp_name}/model_{exp_id}"):
-    print(f"\n\n XXXXXXXX Experiment number {exp_id} skipped, already done XXXXXXXX")
+if os.path.exists(f"models/{model_name}/model_{model_id}"):
+    print(f"\n\n XXXXXXXX Training of model {model_id} skipped, already done XXXXXXXX")
 
 else :
-    print(f"XXXXXXXX Starting experiment {exp_id} with parameters :", parameters)
-    data_path = os.getcwd() + "/data/" + exp_name
+    print(f"XXXXXXXX Starting training of model {model_id} with parameters :", parameters)
+    run = wandb.init(
+        entity="thomas-vitry",
+        project="CVDB",
+        config=parameters,
+    )
+
+    data_path = os.getcwd() + "/data/" + model_name
     train_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True)
     test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = NeuralNetwork().to(device)
+    model = (mu.CMNISTNeuralNetwork() if parameters["model_name"] == "MNIST" else None).to(device)
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     
     accuracy_matrixes = []
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
         train(train_dataloader, model, loss_fn, optimizer)
         print("                                            ")
-        accuracy_matrix = test(test_dataloader, model, loss_fn)
+        correctness_matrix, appearance_matrix = test(test_dataloader, model, loss_fn)
     
-    torch.save(model.state_dict(), f"models/{exp_name}/model_{exp_id}")
+    torch.save(model.state_dict(), f"models/{model_name}/model_{model_id}")
 
-    parameters["accuracy_matrix"] = accuracy_matrix
+    parameters["correctness_matrix"] = correctness_matrix
+    parameters["appearance_matrix"] = appearance_matrix
 
     with open(result_path, "wb") as f:
         pkl.dump(parameters, f)
     
-    print(f"OOOOOOOOO Experiment number {exp_id} runned with sucess OOOOOOOOO")
+    run.finish()
+    print(f"OOOOOOOOO Training of model number {model_id} runned with sucess OOOOOOOOO")
 
