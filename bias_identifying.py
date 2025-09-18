@@ -59,7 +59,8 @@ parser.add_argument("--layer_depth", type=int, default=4)
 parser.add_argument("--number_of_concept", type=int, default=40)
 parser.add_argument("--patch_size", type=int, default=8)
 parser.add_argument("--concept_dataset_size", type=int, default=2000)
-parser.add_argument("--backprop_step", type=int, default=1000)
+# parser.add_argument("--backprop_step", type=int, default=1000)
+# parser.add_argument("--concept_threshold", type=float, default=0.3)
 
 
 args = parser.parse_args()
@@ -72,7 +73,8 @@ layer_depth = args.layer_depth
 number_of_concept = args.number_of_concept
 patch_size = args.patch_size
 concept_dataset_size = args.concept_dataset_size
-backprop_step = args.backprop_step
+# backprop_step = args.backprop_step
+backprop_steps = [1, 10, 100, 1000]
 
 result_path = "models/"
 result_path += model_name + "/"
@@ -95,7 +97,7 @@ parameters = {
     "number_of_concept":number_of_concept,
     "patch_size":patch_size,
     "concept_dataset_size":concept_dataset_size,
-    "backprop_step":backprop_step,
+    "backprop_steps":backprop_steps,
 
 }
 
@@ -143,10 +145,11 @@ else :
     gr = cu.Gradient_retriever(list(model.children())[layer_depth-1])
 
 
-    results = cu.gather_all_concept_results(train_dataloader, model, craft, gr, backprop_mult=backprop_step)
+    for backprop_step in backprop_steps:
+        results = cu.gather_all_concept_results(train_dataloader, model, craft, gr, backprop_mult=backprop_step)
 
-    res = {}
-    for classe in range(10):
+        res = {}
+        for classe in range(10):
             biases = cu.get_bias_concept(results=results, studied_class=classe, number_of_concepts=number_of_concept)
             study_list = list(biases.items())
             study_list.sort(key=lambda x : x[1])
@@ -155,8 +158,8 @@ else :
                     res[c_id] = max(res[c_id], val)
                 else :
                     res[c_id] = val
-    res = [(key, val) for key, val in res.items()]
-    res.sort(key= lambda x: -x[1])
+        res = [(key, val) for key, val in res.items()]
+        res.sort(key= lambda x: -x[1])
 
     parameters["concept_bias"] = res
     parameters["concept_results"] = results

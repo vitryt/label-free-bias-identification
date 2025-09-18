@@ -53,7 +53,7 @@ class BiasedMNIST(MNIST):
                   [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]]
 
     def __init__(self, root, train=True, transform=None, target_transform=None,
-                 download=False, data_label_correlation=1.0, n_confusing_labels=9):
+                 download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42):
         super().__init__(root, train=train, transform=transform,
                          target_transform=target_transform,
                          download=download)
@@ -61,6 +61,7 @@ class BiasedMNIST(MNIST):
 
         self.data_label_correlation = data_label_correlation
         self.n_confusing_labels = n_confusing_labels
+        self.rng = np.random.RandomState(shuffle_seed)
         self.data, self.targets, self.biased_targets = self.build_biased_mnist()
 
         indices = np.arange(len(self.data))
@@ -80,7 +81,7 @@ class BiasedMNIST(MNIST):
 
     def _shuffle(self, iteratable):
         if self.random:
-            np.random.shuffle(iteratable)
+            self.rng.shuffle(iteratable)
 
     def _make_biased_mnist(self, indices, label):
         raise NotImplementedError
@@ -146,27 +147,27 @@ class BiasedMNIST(MNIST):
 
 class ColourBiasedMNIST(BiasedMNIST):
     def __init__(self, root, train=True, transform=None, target_transform=None,
-                 download=False, data_label_correlation=1.0, n_confusing_labels=9):
+                 download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42):
         super(ColourBiasedMNIST, self).__init__(root, train=train, transform=transform,
                                                 target_transform=target_transform,
                                                 download=download,
                                                 data_label_correlation=data_label_correlation,
-                                                n_confusing_labels=n_confusing_labels)
+                                                n_confusing_labels=n_confusing_labels,
+                                                shuffle_seed=shuffle_seed)
 
     def _binary_to_colour(self, data, colour):
-        fg_data = torch.zeros_like(data)
-        fg_data[data != 0] = 255
-        fg_data[data == 0] = 0
+        # fg_data = torch.zeros_like(data)
+        # fg_data[data != 0] = 255
+        # fg_data[data == 0] = 0
+        fg_data = data/255
         fg_data = torch.stack([fg_data, fg_data, fg_data], dim=1)
 
-        bg_data = torch.zeros_like(data)
-        bg_data[data == 0] = 1
-        bg_data[data != 0] = 0
+        bg_data = torch.ones_like(data)
         bg_data = torch.stack([bg_data, bg_data, bg_data], dim=3)
         bg_data = bg_data * torch.ByteTensor(colour)
         bg_data = bg_data.permute(0, 3, 1, 2)
 
-        data = fg_data + bg_data
+        data = fg_data * bg_data
         return data.permute(0, 2, 3, 1)
 
     def _make_biased_mnist(self, indices, label):
@@ -174,17 +175,153 @@ class ColourBiasedMNIST(BiasedMNIST):
 
 
 def get_biased_mnist_dataloader(root, batch_size, data_label_correlation,
-                                n_confusing_labels=9, train=True, num_workers=8):
+                                n_confusing_labels=9, train=True, num_workers=8, validation=0, split_gen_seed = 42, shuffle_seed = 42):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5, 0.5, 0.5),
                              std=(0.5, 0.5, 0.5))])
     dataset = ColourBiasedMNIST(root, train=train, transform=transform,
                                 download=True, data_label_correlation=data_label_correlation,
-                                n_confusing_labels=n_confusing_labels)
-    dataloader = data.DataLoader(dataset=dataset,
+                                n_confusing_labels=n_confusing_labels, shuffle_seed = shuffle_seed)
+    if not train or not validation:
+        dataloader = data.DataLoader(dataset=dataset,
                                  batch_size=batch_size,
                                  shuffle=True,
                                  num_workers=num_workers,
                                  pin_memory=True)
-    return dataloader
+        return dataloader
+    else:
+        split_gen = torch.Generator()
+        split_gen.manual_seed(split_gen_seed)
+        train_set, validation_set = data.random_split(dataset, (1 - validation, validation), generator = split_gen)
+        train_dataloader = data.DataLoader(dataset=train_set,
+                                 batch_size=batch_size,
+                                 shuffle=True,
+                                 num_workers=num_workers,
+                                 pin_memory=True)
+        val_dataloader = data.DataLoader(dataset=validation_set,
+                                 batch_size=batch_size,
+                                 shuffle=True,
+                                 num_workers=num_workers,
+                                 pin_memory=True)
+        return train_dataloader, val_dataloader
+
+
+
+
+
+class BiasDifferenceMNIST(MNIST):
+
+    COLOUR_MAP = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225],
+                  [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]]
+
+    def __init__(self, root, train=True, transform=None, target_transform=None,
+                 download=False, bias_colour=[255, 0, 0], shuffle_seed=42):
+        super().__init__(root, train=train, transform=transform,
+                         target_transform=target_transform,
+                         download=download)
+        self.random = True
+
+        if isinstance(bias_colour, int):
+            self.bias_colour = self.COLOUR_MAP[bias_colour]
+        else:
+            self.bias_colour = bias_colour
+        self.rng = np.random.RandomState(shuffle_seed)
+        self.neutral_data = torch.stack([self.data, self.data, self.data], dim=1)
+        self.neutral_data = self.neutral_data.permute(0, 2, 3, 1)
+        self.data, self.targets = self.build_biased_mnist()
+
+        indices = np.arange(len(self.data))
+        self._shuffle(indices)
+
+        self.data = self.data[indices].numpy()
+        self.neutral_data = self.neutral_data[indices].numpy()
+        self.targets = self.targets[indices]
+
+    @property
+    def raw_folder(self):
+        return os.path.join(self.root, 'raw')
+
+    @property
+    def processed_folder(self):
+        return os.path.join(self.root, 'processed')
+
+    def _shuffle(self, iteratable):
+        if self.random:
+            self.rng.shuffle(iteratable)
+
+    def _binary_to_colour(self, data, colour):
+        # fg_data = torch.zeros_like(data)
+        # fg_data[data != 0] = 255
+        # fg_data[data == 0] = 0
+        fg_data = data/255
+        fg_data = torch.stack([fg_data, fg_data, fg_data], dim=1)
+
+        bg_data = torch.ones_like(data)
+        bg_data = torch.stack([bg_data, bg_data, bg_data], dim=3)
+        bg_data = bg_data * torch.ByteTensor(colour)
+        bg_data = bg_data.permute(0, 3, 1, 2)
+
+        data = fg_data * bg_data
+        return data.permute(0, 2, 3, 1)
+
+    def _make_biased_mnist(self):
+        return self._binary_to_colour(self.data, self.bias_colour), self.targets
+
+    def build_biased_mnist(self):
+        """Build biased MNIST.
+        """
+        data = torch.ByteTensor()
+        targets = torch.LongTensor()
+
+        data, targets = self._make_biased_mnist()
+        return data, targets
+
+    def __getitem__(self, index):
+        neutral_img, biased_img, target = self.neutral_data[index], self.data[index], int(self.targets[index])
+        
+        neutral_img = Image.fromarray(neutral_img.astype(np.uint8), mode='RGB')
+        biased_img = Image.fromarray(biased_img.astype(np.uint8), mode='RGB')
+
+        if self.transform is not None:
+            neutral_img = self.transform(neutral_img)
+            biased_img = self.transform(biased_img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return neutral_img, biased_img, target
+
+
+def get_bias_difference_mnist_dataloader(root, batch_size, train=True, bias_colour = [255, 0, 0], num_workers=8, validation=0, split_gen_seed = 42, shuffle_seed = 42):
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.5, 0.5, 0.5),
+                             std=(0.5, 0.5, 0.5))])
+    dataset = BiasDifferenceMNIST(root, train=train, transform=transform,
+                                download=True,
+                                bias_colour=bias_colour,
+                                shuffle_seed = shuffle_seed)
+    if not train or not validation:
+        dataloader = data.DataLoader(dataset=dataset,
+                                 batch_size=batch_size,
+                                 shuffle=True,
+                                 num_workers=num_workers,
+                                 pin_memory=True)
+        return dataloader
+    else:
+        split_gen = torch.Generator()
+        split_gen.manual_seed(split_gen_seed)
+        train_set, validation_set = data.random_split(dataset, (1 - validation, validation), generator = split_gen)
+        train_dataloader = data.DataLoader(dataset=train_set,
+                                 batch_size=batch_size,
+                                 shuffle=True,
+                                 num_workers=num_workers,
+                                 pin_memory=True)
+        val_dataloader = data.DataLoader(dataset=validation_set,
+                                 batch_size=batch_size,
+                                 shuffle=True,
+                                 num_workers=num_workers,
+                                 pin_memory=True)
+        return train_dataloader, val_dataloader
+

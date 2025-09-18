@@ -13,7 +13,7 @@ class Gradient_retriever():
         self.handle.remove()
 
 
-def get_backprop_concepts(X, y, y_pred, model, concept_engine, gradient_recoverer, back_mult = 1):
+def get_backprop_concepts(X, y, model, concept_engine, gradient_recoverer, back_mult = 1):
     """
     Returns :
     - concept_activation : the activations for each input X
@@ -44,7 +44,7 @@ def get_backprop_concepts(X, y, y_pred, model, concept_engine, gradient_recovere
 def gather_all_concept_results(dataloader, model, concept_engine, gradient_recoverer, backprop_mult=1):
     results = {}
     output_size = 0
-    for X, y, y_pred in dataloader:
+    for X, y, _ in dataloader:
         y_predi = (model(X.cuda()).cpu())
         if output_size == 0:
             output_size = len(y_predi[0])
@@ -53,13 +53,11 @@ def gather_all_concept_results(dataloader, model, concept_engine, gradient_recov
         wrongly_classified = (y_predi != y)
         X_wrong = X[wrongly_classified]
         y_wrong = y[wrongly_classified]
-        y_pred_wrong = y_pred[wrongly_classified]
         y_predi_wrong = y_predi[wrongly_classified]
         if len(y_wrong > 0):
             concept_activation, neg_concept_diff, pos_concept_diff = get_backprop_concepts(
                 X = X_wrong,
                 y = y_wrong,
-                y_pred = y_pred_wrong,
                 model = model,
                 concept_engine = concept_engine,
                 gradient_recoverer = gradient_recoverer,
