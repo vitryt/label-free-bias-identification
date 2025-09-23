@@ -72,9 +72,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_id", type=int, default=0)
 parser.add_argument("--model_name", type=str, default="MNIST")
 parser.add_argument("--batch_size", type=int, default=256)
-parser.add_argument("--train_correlation", type=float, default=0.7)
+parser.add_argument("--train_correlation", type=float, default=0.8)
 parser.add_argument("--test_correlation", type=float, default=0.1)
 parser.add_argument("--epochs", type=int, default=20)
+parser.add_argument("--split_seed", type=int, default=42)
+parser.add_argument("--shuffle_seed", type=int, default=42)
 
 args = parser.parse_args()
 
@@ -84,6 +86,8 @@ batch_size = args.batch_size
 train_correlation = args.train_correlation
 test_correlation = args.test_correlation
 epochs = args.epochs
+split_seed = args.split_seed
+shuffle_seed = args.shuffle_seed
 
 result_path = "models/"
 if not os.path.exists(result_path):
@@ -100,6 +104,8 @@ if os.path.exists(result_path):
     train_correlation = parameters["train_correlation"]
     test_correlation = parameters["test_correlation"]
     epochs = parameters["epochs"]
+    split_seed = parameters["split_seed"]
+    shuffle_seed = parameters["shuffle_seed"]
 else:
     parameters = {
         "model_id":model_id,
@@ -108,6 +114,8 @@ else:
         "train_correlation":train_correlation,
         "test_correlation":test_correlation,
         "epochs":epochs,
+        "split_seed":split_seed,
+        "shuffle_seed":shuffle_seed,
     }
 
 if os.path.exists(f"models/{model_name}/model_{model_id}"):
@@ -122,8 +130,8 @@ else :
     )
 
     data_path = os.getcwd() + "/data/" + model_name
-    train_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True)
-    test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False)
+    train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
+    test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")

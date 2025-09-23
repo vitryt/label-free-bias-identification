@@ -1,3 +1,4 @@
 models/*
 data/*
 wand/*
+src/__pycache__/*

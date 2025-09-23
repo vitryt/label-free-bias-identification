@@ -13,7 +13,7 @@ class Gradient_retriever():
         self.handle.remove()
 
 
-def get_backprop_concepts(X, y, model, concept_engine, gradient_recoverer, back_mult = 1):
+def get_backprop_concepts(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_mult = 1, device="cpu"):
     """
     Returns :
     - concept_activation : the activations for each input X
@@ -41,7 +41,7 @@ def get_backprop_concepts(X, y, model, concept_engine, gradient_recoverer, back_
     return concept_activation, neg_concept_diff, pos_concept_diff
 
 
-def gather_all_concept_results(dataloader, model, concept_engine, gradient_recoverer, backprop_mult=1):
+def gather_all_concept_results(dataloader, model, loss_fn, concept_engine, gradient_recoverer, backprop_mult=1, device="cpu"):
     results = {}
     output_size = 0
     for X, y, _ in dataloader:
@@ -59,9 +59,11 @@ def gather_all_concept_results(dataloader, model, concept_engine, gradient_recov
                 X = X_wrong,
                 y = y_wrong,
                 model = model,
+                loss_fn = loss_fn,
                 concept_engine = concept_engine,
                 gradient_recoverer = gradient_recoverer,
                 back_mult = backprop_mult,
+                device = device,
             )
             for i in range(output_size):
                 if not i in results:
@@ -122,3 +124,50 @@ def get_bias_concept(results, studied_class, number_of_concepts):
     for key, val in na_biases.items():
         ultimate_bias[key]= val - pr_biases[key]
     return ultimate_bias
+
+
+
+def get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device="cpu"):
+    """
+    Returns :
+    - concept_activation : the activations for each input X
+    - neg_concept_diff : the concept activation in the direction of the backpropagated gradient descent
+    - pos_concept_diff : the concept activation in the direction of the backpropagated gradient ascent
+    """
+    unbiased_activation = concept_engine.input_to_latent(Xunbiased.cuda()).cpu()
+    unbiased_concept_activation = concept_engine.transform(inputs=None, activations=unbiased_activation)
+
+    biased_activation = concept_engine.input_to_latent(Xbiased.cuda()).cpu()
+    biased_concept_activation = concept_engine.transform(inputs=None, activations=biased_activation)
+
+    return unbiased_concept_activation, biased_concept_activation
+
+def gather_all_bias_results(bias_dataloaders, model, concept_engine, device="cpu"):
+    results = {}
+    output_size = 0
+    for bias_label, bias_dataloader in bias_dataloaders.items():
+        results[bias_label] = {}
+        for Xunbiased, Xbiased, y in bias_dataloader:
+            # y_predi = (model(X.cuda()).cpu())
+            # if output_size == 0:
+            #     output_size = len(y_predi[0])
+            #     results = {}
+            # y_predi = y_predi.argmax(dim=1)
+            # wrongly_classified = (y_predi != y)
+            # X_wrong = X[wrongly_classified]
+            # y_wrong = y[wrongly_classified]
+            # y_predi_wrong = y_predi[wrongly_classified]
+            unbiased_concept_activation, biased_concept_activation = get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device)
+            for label in y.unique():
+                label = int(label)
+                if label in results[bias_label]:
+                    results[bias_label][label] = (
+                                    np.concat((results[bias_label][label][0], unbiased_concept_activation[y == label])),
+                                    np.concat((results[bias_label][label][1], biased_concept_activation[y == label]))
+                                    )
+                else :
+                    results[bias_label][label] = (
+                        unbiased_concept_activation[y==label],
+                        biased_concept_activation[y==label]
+                    )
+    return results
