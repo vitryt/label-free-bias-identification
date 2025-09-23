@@ -62,6 +62,7 @@ parser.add_argument("--concept_id", type=int, default=0)
 # parser.add_argument("--concept_dataset_size", type=int, default=2000)
 # parser.add_argument("--backprop_step", type=int, default=1000)
 # parser.add_argument("--concept_threshold", type=float, default=0.3)
+parser.add_argument("--gpu_id", type=int, default=0)
 
 
 args = parser.parse_args()
@@ -75,6 +76,9 @@ concept_id = args.concept_id
 # patch_size = args.patch_size
 # concept_dataset_size = args.concept_dataset_size
 bias_labels = range(10)
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
 result_path = "models/"
 result_path += model_name + "/"

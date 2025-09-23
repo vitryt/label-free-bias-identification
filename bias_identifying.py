@@ -61,6 +61,7 @@ parser.add_argument("--patch_size", type=int, default=8)
 parser.add_argument("--concept_dataset_size", type=int, default=10000)
 # parser.add_argument("--backprop_step", type=int, default=1000)
 # parser.add_argument("--concept_threshold", type=float, default=0.3)
+parser.add_argument("--gpu_id", type=int, default=0)
 
 
 args = parser.parse_args()
@@ -75,6 +76,9 @@ patch_size = args.patch_size
 concept_dataset_size = args.concept_dataset_size
 # backprop_step = args.backprop_step
 backprop_steps = [1, 10, 30, 70, 100, 300, 700, 1000]
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
 result_path = "models/"
 result_path += model_name + "/"

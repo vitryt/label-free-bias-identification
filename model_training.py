@@ -77,6 +77,7 @@ parser.add_argument("--test_correlation", type=float, default=0.1)
 parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--split_seed", type=int, default=42)
 parser.add_argument("--shuffle_seed", type=int, default=42)
+parser.add_argument("--gpu_id", type=int, default=0)
 
 args = parser.parse_args()
 
@@ -88,6 +89,9 @@ test_correlation = args.test_correlation
 epochs = args.epochs
 split_seed = args.split_seed
 shuffle_seed = args.shuffle_seed
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
 result_path = "models/"
 if not os.path.exists(result_path):

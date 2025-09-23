@@ -1,4 +1,4 @@
 models/*
 data/*
-wand/*
+wandb/*
 src/__pycache__/*
