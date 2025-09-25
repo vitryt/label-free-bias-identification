@@ -77,7 +77,7 @@ parser.add_argument("--test_correlation", type=float, default=0.1)
 parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--split_seed", type=int, default=42)
 parser.add_argument("--shuffle_seed", type=int, default=42)
-parser.add_argument("--gpu_id", type=int, default=0)
+parser.add_argument("--gpu_id", type=str, default="0")
 
 args = parser.parse_args()
 

@@ -62,7 +62,7 @@ parser.add_argument("--concept_id", type=int, default=0)
 # parser.add_argument("--concept_dataset_size", type=int, default=2000)
 # parser.add_argument("--backprop_step", type=int, default=1000)
 # parser.add_argument("--concept_threshold", type=float, default=0.3)
-parser.add_argument("--gpu_id", type=int, default=0)
+parser.add_argument("--gpu_id", type=str, default="0")
 
 
 args = parser.parse_args()
