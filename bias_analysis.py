@@ -63,6 +63,7 @@ parser.add_argument("--concept_id", type=int, default=0)
 # parser.add_argument("--backprop_step", type=int, default=1000)
 # parser.add_argument("--concept_threshold", type=float, default=0.3)
 parser.add_argument("--gpu_id", type=str, default="0")
+parser.add_argument("--result_path", type=str, default="")
 
 
 args = parser.parse_args()
@@ -80,7 +81,7 @@ bias_labels = range(10)
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
-result_path = "models/"
+result_path = args.result_path + "models/"
 result_path += model_name + "/"
 
 model_result_path = result_path + f"model_{model_id}.pkl"

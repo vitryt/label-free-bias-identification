@@ -78,6 +78,7 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--split_seed", type=int, default=42)
 parser.add_argument("--shuffle_seed", type=int, default=42)
 parser.add_argument("--gpu_id", type=str, default="0")
+parser.add_argument("--result_path", type=str, default="")
 
 args = parser.parse_args()
 
@@ -93,7 +94,7 @@ shuffle_seed = args.shuffle_seed
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
-result_path = "models/"
+result_path = args.result_path + "models/"
 if not os.path.exists(result_path):
     os.mkdir(result_path)
 result_path += model_name + "/"
