@@ -63,6 +63,7 @@ parser.add_argument("--concept_dataset_size", type=int, default=10000)
 # parser.add_argument("--concept_threshold", type=float, default=0.3)
 parser.add_argument("--gpu_id", type=str, default="0")
 parser.add_argument("--result_path", type=str, default="")
+parser.add_argument("--data_path", type=str, default="")
 
 
 args = parser.parse_args()
@@ -77,6 +78,11 @@ patch_size = args.patch_size
 concept_dataset_size = args.concept_dataset_size
 # backprop_step = args.backprop_step
 backprop_steps = [1, 10, 30, 70, 100, 300, 700, 1000]
+
+data_path = args.data_path
+if data_path == "":
+    data_path = os.getcwd()
+data_path += "/data/" + model_name
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -119,7 +125,6 @@ else :
     #     config=parameters,
     # )
 
-    data_path = os.getcwd() + "/data/" + model_name
     train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
     test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
 
@@ -127,8 +132,8 @@ else :
     print(f"Using {device} device")
 
     model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "MNIST" else None).to(device)
-    assert(os.path.exists(f"models/{model_name}/model_{model_id}"))
-    model.load_state_dict(torch.load(f"models/{model_name}/model_{model_id}"))
+    assert(os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"))
+    model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
 
     loss_fn = nn.CrossEntropyLoss()
 

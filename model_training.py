@@ -79,6 +79,7 @@ parser.add_argument("--split_seed", type=int, default=42)
 parser.add_argument("--shuffle_seed", type=int, default=42)
 parser.add_argument("--gpu_id", type=str, default="0")
 parser.add_argument("--result_path", type=str, default="")
+parser.add_argument("--data_path", type=str, default="")
 
 args = parser.parse_args()
 
@@ -90,6 +91,11 @@ test_correlation = args.test_correlation
 epochs = args.epochs
 split_seed = args.split_seed
 shuffle_seed = args.shuffle_seed
+
+data_path = args.data_path
+if data_path == "":
+    data_path = os.getcwd()
+data_path += "/data/" + model_name
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -123,7 +129,7 @@ else:
         "shuffle_seed":shuffle_seed,
     }
 
-if os.path.exists(f"models/{model_name}/model_{model_id}"):
+if os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"):
     print(f"\n\n XXXXXXXX Training of model {model_id} skipped, already done XXXXXXXX")
 
 else :
@@ -134,7 +140,6 @@ else :
         config=parameters,
     )
 
-    data_path = os.getcwd() + "/data/" + model_name
     train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
     test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
 
@@ -152,7 +157,7 @@ else :
         print("                                            ")
         correctness_matrix, appearance_matrix = test(test_dataloader, model, loss_fn)
     
-    torch.save(model.state_dict(), f"models/{model_name}/model_{model_id}")
+    torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
 
     parameters["correctness_matrix"] = correctness_matrix
     parameters["appearance_matrix"] = appearance_matrix
