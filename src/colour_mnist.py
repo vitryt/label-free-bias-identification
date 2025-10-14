@@ -222,14 +222,10 @@ class BiasDifferenceMNIST(MNIST):
                          download=download)
         self.random = True
 
-        if isinstance(bias_colour, int):
-            self.bias_colour = self.COLOUR_MAP[bias_colour]
-        else:
-            self.bias_colour = bias_colour
+        self.bias_colour = bias_colour
         self.rng = np.random.RandomState(shuffle_seed)
-        self.neutral_data = torch.stack([self.data, self.data, self.data], dim=1)
-        self.neutral_data = self.neutral_data.permute(0, 2, 3, 1)
-        self.data, self.targets = self.build_biased_mnist()
+        self.neutral_data, self.unbias_label = self.build_unbiased_mnist()
+        self.data = self.build_biased_mnist()
 
         indices = np.arange(len(self.data))
         self._shuffle(indices)
@@ -265,8 +261,8 @@ class BiasDifferenceMNIST(MNIST):
         data = fg_data * bg_data
         return data.permute(0, 2, 3, 1)
 
-    def _make_biased_mnist(self):
-        return self._binary_to_colour(self.data, self.bias_colour), self.targets
+    def _make_biased_mnist(self, indices, label):
+        return self._binary_to_colour(self.data[indices], self.COLOUR_MAP[label])
 
     def build_biased_mnist(self):
         """Build biased MNIST.
@@ -274,8 +270,18 @@ class BiasDifferenceMNIST(MNIST):
         data = torch.ByteTensor()
         targets = torch.LongTensor()
 
-        data, targets = self._make_biased_mnist()
-        return data, targets
+        data = self._make_biased_mnist(np.arange(len(self.data)), self.bias_colour)
+        return data
+
+    def build_unbiased_mnist(self):
+        bias_labels = self.rng.randint(0, 10, self.targets.shape)
+        data = torch.zeros((len(self.data), 28, 28, 3))
+        targets = torch.LongTensor()
+
+        for label in range(10):
+            indices = np.where(bias_labels == label)
+            data[indices] = self._make_biased_mnist(indices, label)
+        return data, bias_labels
 
     def __getitem__(self, index):
         neutral_img, biased_img, target = self.neutral_data[index], self.data[index], int(self.targets[index])

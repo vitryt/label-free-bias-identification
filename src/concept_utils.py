@@ -93,8 +93,10 @@ def analyze_results(results, i, number_of_concept):
     n_removed_bias = np.zeros(number_of_concept)
     # Count concepts that were added/removed when doing gradient ascend
     p_appearance = np.ones(number_of_concept)
-    # p_added_bias = np.zeros(number_of_concept)
+    p_added_bias = np.zeros(number_of_concept)
     p_removed_bias = np.zeros(number_of_concept)
+    raw_n_diff = np.zeros(number_of_concept)
+    raw_p_diff = np.zeros(number_of_concept)
     for key1, val1 in results.items():
         for key2, val2 in val1.items():
             if key1 == i:
@@ -102,11 +104,14 @@ def analyze_results(results, i, number_of_concept):
                 # n_appearance += ((val2[0] == 0)).sum(axis=0)
                 n_added_bias += ((val2[0]==0) & (val2[1]>0)).sum(axis=0)
                 n_removed_bias += ((val2[0]>0) & (val2[1]==0)).sum(axis=0)
+                raw_n_diff += (val2[1] - val2[0]).sum(axis=0)
             if key2 == i:
                 p_appearance += len(val2[0])
                 # p_appearance += (val2[0] > 0).sum(axis=0)
+                p_added_bias += ((val2[0]==0) & (val2[2]>0)).sum(axis=0)
                 p_removed_bias += ((val2[0]>0) & (val2[2]==0)).sum(axis=0)
-    return n_added_bias, n_removed_bias, n_appearance, p_removed_bias, p_appearance
+                raw_p_diff += (val2[1] - val2[0]).sum(axis=0)
+    return n_added_bias, n_removed_bias, n_appearance, p_added_bias, p_removed_bias, p_appearance, raw_n_diff/n_appearance, raw_p_diff/p_appearance
 
 
 def get_bias_concept(results, studied_class, number_of_concepts):
@@ -129,10 +134,6 @@ def get_bias_concept(results, studied_class, number_of_concepts):
 
 def get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device="cpu"):
     """
-    Returns :
-    - concept_activation : the activations for each input X
-    - neg_concept_diff : the concept activation in the direction of the backpropagated gradient descent
-    - pos_concept_diff : the concept activation in the direction of the backpropagated gradient ascent
     """
     unbiased_activation = concept_engine.input_to_latent(Xunbiased.cuda()).cpu()
     unbiased_concept_activation = concept_engine.transform(inputs=None, activations=unbiased_activation)
