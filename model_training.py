@@ -148,7 +148,7 @@ else :
 
     model = (mu.CMNISTNeuralNetwork() if parameters["model_name"] == "MNIST" else None).to(device)
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
     
     accuracy_matrixes = []
     for t in range(epochs):

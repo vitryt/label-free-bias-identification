@@ -152,6 +152,7 @@ else :
     print(f"-Training the concept decomposition", end="\r")
     concept_dataset = torch.Tensor([])
     for X, y, y_pred in train_dataloader:
+        print(f"Building concept dataset {len(concept_dataset)}/{concept_dataset_size}", end="\r")
         if len(concept_dataset) >= concept_dataset_size:
             break
         concept_dataset = torch.cat((concept_dataset, X))
