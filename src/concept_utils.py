@@ -13,18 +13,19 @@ class Gradient_retriever():
         self.handle.remove()
 
 
-def get_backprop_concepts(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_mult = 1, device="cpu"):
+def get_backprop_concepts(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_mult = 1, device="cpu", activation = None):
     """
     Returns :
     - concept_activation : the activations for each input X
     - neg_concept_diff : the concept activation in the direction of the backpropagated gradient descent
     - pos_concept_diff : the concept activation in the direction of the backpropagated gradient ascent
     """
-    activation = concept_engine.input_to_latent(X.cuda()).cpu()
+    if activation == None:
+        activation = concept_engine.input_to_latent(X.cuda()).cpu()
     concept_activation = concept_engine.transform(inputs=None, activations=activation)
     model.eval()
     model.zero_grad()
-    outpt = model(X.to(device)).cpu()
+    outpt = concept_engine.latent_to_logit(activation.to(device)).cpu()
     loss = loss_fn(outpt, y)
     loss.backward()
     back_activation = gradient_recoverer.grad.cpu()
@@ -110,7 +111,7 @@ def analyze_results(results, i, number_of_concept):
                 # p_appearance += (val2[0] > 0).sum(axis=0)
                 p_added_bias += ((val2[0]==0) & (val2[2]>0)).sum(axis=0)
                 p_removed_bias += ((val2[0]>0) & (val2[2]==0)).sum(axis=0)
-                raw_p_diff += (val2[1] - val2[0]).sum(axis=0)
+                raw_p_diff += (val2[2] - val2[0]).sum(axis=0)
     return n_added_bias, n_removed_bias, n_appearance, p_added_bias, p_removed_bias, p_appearance, raw_n_diff/n_appearance, raw_p_diff/p_appearance
 
 
@@ -171,4 +172,79 @@ def gather_all_bias_results(bias_dataloaders, model, concept_engine, device="cpu
                         unbiased_concept_activation[y==label],
                         biased_concept_activation[y==label]
                     )
+    return results
+
+
+
+
+def get_backprop_activations(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_mult = 1, device="cpu"):
+    """
+    Returns :
+    - concept_activation : the activations for each input X
+    - neg_concept_diff : the concept activation in the direction of the backpropagated gradient descent
+    - pos_concept_diff : the concept activation in the direction of the backpropagated gradient ascent
+    """
+    activation = concept_engine.input_to_latent(X.cuda()).cpu()
+    concept_activation = concept_engine.transform(inputs=None, activations=activation)
+    model.eval()
+    model.zero_grad()
+    outpt = model(X.to(device)).cpu()
+    loss = loss_fn(outpt, y)
+    loss.backward()
+    back_activation = gradient_recoverer.grad.cpu()
+    modified_activation = activation - (back_activation * back_mult)
+    modified_activation[(modified_activation) < 0] = 0
+    back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
+    neg_concept_diff = back_concept_activation +1 -1
+    # neg_concept_diff = (back_concept_activation - concept_activation)
+    modified_activation = activation + (back_activation * back_mult)
+    modified_activation[(modified_activation) < 0] = 0
+    back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
+    pos_concept_diff = back_concept_activation +1 -1
+    # pos_concept_diff = (back_concept_activation - concept_activation)
+    return concept_activation, neg_concept_diff, pos_concept_diff
+
+
+def gather_all_concept_results(dataloader, model, loss_fn, concept_engine, gradient_recoverer, backprop_mult=1, device="cpu"):
+    results = {}
+    output_size = 0
+    for X, y, _ in dataloader:
+        y_predi = (model(X.cuda()).cpu())
+        if output_size == 0:
+            output_size = len(y_predi[0])
+            results = {}
+        y_predi = y_predi.argmax(dim=1)
+        wrongly_classified = (y_predi != y)
+        X_wrong = X[wrongly_classified]
+        y_wrong = y[wrongly_classified]
+        y_predi_wrong = y_predi[wrongly_classified]
+        if len(y_wrong > 0):
+            concept_activation, neg_concept_diff, pos_concept_diff = get_backprop_concepts(
+                X = X_wrong,
+                y = y_wrong,
+                model = model,
+                loss_fn = loss_fn,
+                concept_engine = concept_engine,
+                gradient_recoverer = gradient_recoverer,
+                back_mult = backprop_mult,
+                device = device,
+            )
+            for i in range(output_size):
+                if not i in results:
+                    results[i] = {}
+                for j in range(output_size):
+                    if int(((y_wrong == i) & (y_predi_wrong == j)).sum()) > 0:
+                        indice = [0] if len(concept_activation) == 1 else (y_wrong == i) & (y_predi_wrong == j)
+                        if not j in results[i]:
+                            results[i][j] = (
+                                concept_activation[indice],
+                                pos_concept_diff[indice],
+                                neg_concept_diff[indice],
+                            )
+                        else:
+                            results[i][j] = (
+                                np.concat((results[i][j][0], concept_activation[indice])),
+                                np.concat((results[i][j][1], neg_concept_diff[indice])),
+                                np.concat((results[i][j][2], pos_concept_diff[indice]))
+                                )
     return results
