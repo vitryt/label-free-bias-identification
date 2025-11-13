@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+from torch import nn
+from craft.craft_torch import torch_to_numpy
 
 class Gradient_retriever():
     def __init__(self, layer):
@@ -11,6 +13,42 @@ class Gradient_retriever():
     
     def __del__(self):
         self.handle.remove()
+
+
+def train_concept_engines(dataloader, model, layer_depth, number_of_concept, concept_decomposer, patch_size, concept_dataset_size=3000, batch_size=256, device="cpu"):
+    concept_engines = {}
+    concept_parameters = {}
+    concept_datasets = {}
+    model.eval()
+    model.zero_grad()
+    for X, _, _ in dataloader:
+        y = model(X.to(device)).cpu().argmax(1)
+        for label in y.unique():
+            label = int(label)
+            if not label in concept_datasets:
+                print(f"------------------------------------Added label {label}")
+                concept_datasets[label] = X[y==label]
+            elif len(concept_datasets[label]) < concept_dataset_size:
+                concept_datasets[label] = torch.cat([concept_datasets[label], X[y==label]])
+    g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
+    h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
+    for label, dataset in concept_datasets.items():
+        print(f"Training concept decomposer for class {label}")
+        if len(dataset > concept_dataset_size):
+            dataset = dataset[:concept_dataset_size]
+        concept_engines[label] = concept_decomposer(
+            input_to_latent=g,
+            latent_to_logit = h,
+            number_of_concepts = number_of_concept,
+            patch_size = patch_size,
+            batch_size = batch_size,
+            device = device
+        )
+        concept_parameters[label] = {}
+        concept_parameters[label]["crops"], concept_parameters[label]["crops_u"], concept_parameters[label]["W"] = concept_engines[label].fit(concept_datasets[label])
+        concept_parameters[label]["reducer"] = concept_engines[label].reducer
+        concept_parameters[label]["crops"] = np.moveaxis(torch_to_numpy(concept_parameters[label]["crops"]), 1, -1)
+    return concept_engines, concept_parameters
 
 
 def get_backprop(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_mult = 1, device="cpu", activation = None):
@@ -69,8 +107,9 @@ def get_backprop_concepts(X, y, model, loss_fn, concept_engine, gradient_recover
     return concept_activation, neg_concept_diff, pos_concept_diff
 
 
-def gather_all_concept_results(dataloader, model, loss_fn, concept_engine, gradient_recoverer, backprop_mult=1, device="cpu"):
+def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, gradient_recoverer, backprop_mult=1, device="cpu", multi_concept=False):
     results = {}
+    concept_engine = list(concept_engines.values())[0]
     output_size = 0
     activation_wrong = torch.ByteTensor().to(device)
     y_wrong = torch.LongTensor()
@@ -103,10 +142,42 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engine, gradi
                     )
             ]
         )
-    if len(y_wrong > 0):
-        m = concept_engine.number_of_concepts
-        for i in range(output_size):
-            studied_index = np.array(range(len(y_wrong)))[y_wrong==i]
+    if not multi_concept:
+        if len(y_wrong > 0):
+            m = concept_engine.number_of_concepts
+            for i in range(output_size):
+                studied_index = np.array(range(len(y_wrong)))[y_wrong==i]
+                n = len(studied_index)
+                k = n
+                batch_activation = []
+                batch_backprop = []
+                for j in range(k):
+                    batch_indices = np.random.choice(studied_index, m)
+                    batch_activation.append(activation_wrong[batch_indices].mean(axis=0))
+                    batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
+                batch_activation = torch.stack(batch_activation)
+                batch_backprop = torch.stack(batch_backprop)
+                concept_activation = concept_engine.transform(inputs=None, activations=batch_activation)
+                modified_activation = batch_activation - batch_backprop
+                modified_activation[(modified_activation) < 0] = 0
+                back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
+                concept_descent = back_concept_activation +1 -1
+
+                modified_activation = batch_activation + batch_backprop
+                modified_activation[(modified_activation) < 0] = 0
+                back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
+                concept_ascent = back_concept_activation +1 -1
+                results[i] = {
+                    "concept_base":concept_activation,
+                    "concept_descent":concept_descent,
+                    "concept_ascent":concept_ascent,
+                    "backprop_vector":batch_backprop.cpu(),
+                }
+    else:
+        for label in y_wrong.unique():
+            label = int(label)
+            m = concept_engine.number_of_concepts
+            studied_index = np.array(range(len(y_wrong)))[y_wrong==label]
             n = len(studied_index)
             k = n
             batch_activation = []
@@ -117,17 +188,17 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engine, gradi
                 batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
             batch_activation = torch.stack(batch_activation)
             batch_backprop = torch.stack(batch_backprop)
-            concept_activation = concept_engine.transform(inputs=None, activations=batch_activation)
+            concept_activation = concept_engines[label].transform(inputs=None, activations=batch_activation)
             modified_activation = batch_activation - batch_backprop
             modified_activation[(modified_activation) < 0] = 0
-            back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
+            back_concept_activation = concept_engines[label].transform(inputs=None, activations = modified_activation)
             concept_descent = back_concept_activation +1 -1
 
             modified_activation = batch_activation + batch_backprop
             modified_activation[(modified_activation) < 0] = 0
-            back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
+            back_concept_activation = concept_engines[label].transform(inputs=None, activations = modified_activation)
             concept_ascent = back_concept_activation +1 -1
-            results[i] = {
+            results[label] = {
                 "concept_base":concept_activation,
                 "concept_descent":concept_descent,
                 "concept_ascent":concept_ascent,
@@ -202,10 +273,16 @@ def get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device="cpu"):
 
     return unbiased_concept_activation, biased_concept_activation
 
-def gather_all_bias_results(bias_dataloaders, model, concept_engine, device="cpu"):
+def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cpu"):
+    concept_engine = list(concept_engines.values())[0]
     results = {}
     output_size = 0
     for bias_label, bias_dataloader in bias_dataloaders.items():
+        if len(concept_engines)>1:
+            if bias_label in concept_engines:
+                concept_engine = concept_engines[bias_label]
+            else:
+                raise KeyError(f"the bias labeled {bias_label} has no attributed concept devcomposer device")
         results[bias_label] = {}
         for Xunbiased, Xbiased, y in bias_dataloader:
             # y_predi = (model(X.cuda()).cpu())

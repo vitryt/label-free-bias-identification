@@ -10,60 +10,12 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-from craft.craft_torch import Craft, torch_to_numpy
 import src.model_utils as mu
 
 import wandb
 
 import numpy as np
 
-
-def train(dataloader, model, loss_fn, optimizer):
-    size = len(dataloader.dataset)
-    model.train()
-    for batch, (X, y, _) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
-
-        # Compute prediction error
-        pred = model(X)
-        loss = loss_fn(pred, y)
-
-        # Backpropagation
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-        if batch%100 == 0:
-            loss, current = loss.item(), (batch + 1) * len(X)
-            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]", end="\r")
-
-
-def test(dataloader, model, loss_fn):
-    size = len(dataloader.dataset)
-    num_batches = len(dataloader)
-    model.eval()
-    test_loss, correct = 0, 0
-    appearance_matrix = []
-    correctness_matrix = None
-    with torch.no_grad():
-        for X, y, y_pred in dataloader:
-            X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
-            pred = model(X)
-            if len(appearance_matrix)==0:
-                size_y = len(pred[0])
-                appearance_matrix = np.array([[0 for i in range(size_y)] for j in range(size_y)])
-                correctness_matrix = np.array([[0 for i in range(size_y)] for j in range(size_y)])
-            test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            for i in range(size_y):
-                for j in range(size_y):
-                    appearance_matrix[i][j] += int(((y==i) & (y_pred==j)).sum())
-                    correctness_matrix[i][j] += int((pred.argmax(1)[((y==i) & (y_pred==j))] == i).sum())
-    test_loss /= num_batches
-    correct /= size
-    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
-    run.log({"acc" : correct, "loss":test_loss})
-    return correctness_matrix, appearance_matrix
 
 
 sys.path.append(os.getcwd())
@@ -134,28 +86,29 @@ if os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"):
 
 else :
     print(f"XXXXXXXX Starting training of model {model_id} with parameters :", parameters)
-    run = wandb.init(
-        entity="thomas-vitry",
-        project="CVDB",
-        config=parameters,
-    )
+    # run = wandb.init(
+    #     entity="thomas-vitry",
+    #     project="CVDB",
+    #     config=parameters,
+    # )
 
+    # TODO Change so that the datasets are a parameter
     train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
     test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if parameters["model_name"] == "MNIST" else None).to(device)
+    model = (mu.CMNISTNeuralNetwork() if parameters["model_name"] == "MNIST" else None).to(device) # TODO Change so that the model is a parameter
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3) # TODO Change this so that the optimizer is a parameter
     
     accuracy_matrixes = []
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
-        train(train_dataloader, model, loss_fn, optimizer)
+        mu.train(train_dataloader, model, loss_fn, optimizer, device=device)
         print("                                            ")
-        correctness_matrix, appearance_matrix = test(test_dataloader, model, loss_fn)
+        correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device)
     
     torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
 
@@ -165,6 +118,6 @@ else :
     with open(result_path, "wb") as f:
         pkl.dump(parameters, f)
     
-    run.finish()
+    # run.finish()
     print(f"OOOOOOOOO Training of model number {model_id} runned with sucess OOOOOOOOO")
 

@@ -3,6 +3,7 @@ import argparse
 import sys
 import pickle as pkl
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import random
 
 import torch
@@ -19,6 +20,9 @@ from sklearn.decomposition import NMF
 # import wandb
 
 import numpy as np
+
+import logging
+logging.getLogger('tensorflow').disabled = True
 
 
 def test(dataloader, model, loss_fn):
@@ -55,7 +59,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_id", type=int, default=0)
 parser.add_argument("--model_name", type=str, default="MNIST")
 
-parser.add_argument("--concept_id", type=int, default=0)
+parser.add_argument("--concept_id", type=str, default="0")
 # parser.add_argument("--layer_depth", type=int, default=4)
 # parser.add_argument("--number_of_concept", type=int, default=40)
 # parser.add_argument("--patch_size", type=int, default=8)
@@ -65,7 +69,7 @@ parser.add_argument("--concept_id", type=int, default=0)
 parser.add_argument("--gpu_id", type=str, default="0")
 parser.add_argument("--result_path", type=str, default="")
 parser.add_argument("--data_path", type=str, default="")
-
+parser.add_argument("--multi_concept", type=bool, default=False)
 
 args = parser.parse_args()
 
@@ -144,23 +148,37 @@ else :
     g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
     h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
 
-    craft = Craft(
-        input_to_latent=g,
-        latent_to_logit = h,
-        number_of_concepts = number_of_concept,
-        patch_size = patch_size,
-        batch_size = batch_size,
-        device = device
-    )
+    concept_engines = {}
+    if not args.multi_concept:
+        concept_engines["all"] = Craft(
+            input_to_latent=g,
+            latent_to_logit = h,
+            number_of_concepts = number_of_concept,
+            patch_size = patch_size,
+            batch_size = batch_size,
+            device = device
+        )
 
-    craft.reducer = concept_parameters["reducer"]
-    craft.W = np.array(concept_parameters["W"], dtype=np.float32)
+        concept_engines["all"].reducer = concept_parameters["concept_parameters"]["reducer"]
+        concept_engines["all"].W = np.array(concept_parameters["concept_parameters"]["W"], dtype=np.float32)
+    else:
+        for label in concept_parameters["concept_parameters"].keys():
+            concept_engines[label] = Craft(
+                input_to_latent=g,
+                latent_to_logit=h,
+                number_of_concepts=number_of_concept,
+                patch_size=patch_size,
+                batch_size=batch_size,
+                device=device
+            )
+            concept_engines[label].reducer = concept_parameters["concept_parameters"][label]["reducer"]
+            concept_engines[label].W = np.array(concept_parameters["concept_parameters"][label]["W"], dtype=np.float32)
 
     bias_dataloaders = {
         bias_label: get_bias_difference_mnist_dataloader(root=data_path, batch_size=batch_size, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed, bias_colour=bias_label)[1]
         for bias_label in bias_labels}
 
-    results = cu.gather_all_bias_results(bias_dataloaders, model, craft, device=device)
+    results = cu.gather_all_bias_results(bias_dataloaders, model, concept_engines, device=device)
     
     with open(bias_result_path, "wb") as f:
         pkl.dump(results, f)

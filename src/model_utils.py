@@ -1,5 +1,54 @@
 # Tools to make a classification model on CMNIST
 from torch import nn
+import numpy as np
+import torch
+
+def train(dataloader, model, loss_fn, optimizer, device="cpu"):
+    size = len(dataloader.dataset)
+    model.train()
+    for batch, (X, y, _) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+
+        # Compute prediction error
+        pred = model(X)
+        loss = loss_fn(pred, y)
+
+        # Backpropagation
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        if batch%100 == 0:
+            loss, current = loss.item(), (batch + 1) * len(X)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]", end="\r")
+
+
+def test(dataloader, model, loss_fn, device="cpu"):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    model.eval()
+    test_loss, correct = 0, 0
+    appearance_matrix = []
+    correctness_matrix = None
+    with torch.no_grad():
+        for X, y, y_pred in dataloader:
+            X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
+            pred = model(X)
+            if len(appearance_matrix)==0:
+                size_y = len(pred[0])
+                appearance_matrix = np.array([[0 for i in range(size_y)] for j in range(size_y)])
+                correctness_matrix = np.array([[0 for i in range(size_y)] for j in range(size_y)])
+            test_loss += loss_fn(pred, y).item()
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            for i in range(size_y):
+                for j in range(size_y):
+                    appearance_matrix[i][j] += int(((y==i) & (y_pred==j)).sum())
+                    correctness_matrix[i][j] += int((pred.argmax(1)[((y==i) & (y_pred==j))] == i).sum())
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    # run.log({"acc" : correct, "loss":test_loss})
+    return correctness_matrix, appearance_matrix
 
 
 class CMNISTNeuralNetwork(nn.Module):
