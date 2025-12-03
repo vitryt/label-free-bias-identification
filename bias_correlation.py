@@ -7,7 +7,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import random
 
 import torch
-from src.colour_mnist import get_bias_difference_mnist_dataloader
+from src.colour_mnist import get_biased_mnist_dataloader
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -23,6 +23,7 @@ import numpy as np
 
 import logging
 logging.getLogger('tensorflow').disabled = True
+
 
 
 sys.path.append(os.getcwd())
@@ -91,14 +92,14 @@ else:
     print("Error ! You need to build the concepts before being able to test them !")
     raise FileExistsError(concept_result_path)
 
-bias_result_path = result_path + f"bias_{model_id}_{concept_id}.pkl"
+bias_result_path = result_path + f"correlation_{model_id}_{concept_id}.pkl"
 bias_parameters = {
 }
 
 if os.path.exists(bias_result_path):
-    print(f"\n\n XXXXXXXX Bias analysis experiment number {model_id}|{concept_id} skipped, already done XXXXXXXX")
+    print(f"\n\n XXXXXXXX Correlation analysis experiment number {model_id}|{concept_id} skipped, already done XXXXXXXX")
 else :
-    print(f"XXXXXXXX Starting bias analysis experiment {model_id}|{concept_id}")
+    print(f"XXXXXXXX Starting correlation analysis experiment {model_id}|{concept_id}")
     # run = wandb.init(
     #     entity="thomas-vitry",
     #     project="CVDB",
@@ -146,15 +147,24 @@ else :
             concept_engines[label].reducer = concept_parameters["concept_parameters"][label]["reducer"]
             concept_engines[label].W = np.array(concept_parameters["concept_parameters"][label]["W"], dtype=np.float32)
 
-    bias_dataloaders = {
-        bias_label: get_bias_difference_mnist_dataloader(root=data_path, batch_size=batch_size, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed, bias_colour=bias_label)[1]
-        for bias_label in bias_labels}
-
-    results = cu.gather_all_bias_results(bias_dataloaders, model, concept_engines, device=device)
+    test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
+    res = {}
+    for X, y, y_pred in test_dataloader:
+        X_activation = list(concept_engines.values())[0].input_to_latent(X.to(device)).cpu()
+        for bias_decomposer_label, concept_engine in concept_engines.items():
+            if not bias_decomposer_label in res:
+                res[bias_decomposer_label] = {}
+            X_concepts = concept_engine.transform(inputs=None, activations=X_activation)
+            for bias_label in y_pred.unique():
+                bias_label = int(bias_label)
+                if bias_label in res[bias_decomposer_label]:
+                    res[bias_decomposer_label][bias_label] = np.concatenate([res[bias_decomposer_label][bias_label], X_concepts[y_pred == bias_label]])
+                else:
+                    res[bias_decomposer_label][bias_label] = X_concepts[y_pred==bias_label]
     
     with open(bias_result_path, "wb") as f:
-        pkl.dump(results, f)
+        pkl.dump(res, f)
     
     # run.finish()
-    print(f"OOOOOOOOO Bias analysis experiment number {model_id}|{concept_id} runned with sucess OOOOOOOOO")
+    print(f"OOOOOOOOO Correlation analysis experiment number {model_id}|{concept_id} runned with sucess OOOOOOOOO")
 

@@ -50,6 +50,31 @@ def test(dataloader, model, loss_fn, device="cpu"):
     # run.log({"acc" : correct, "loss":test_loss})
     return correctness_matrix, appearance_matrix
 
+def adjacency_test(dataloader, model, loss_fn, device="cpu"):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    model.eval()
+    test_loss, correct = 0, 0
+    adjacency_matrix = []
+    with torch.no_grad():
+        for X, y, y_pred in dataloader:
+            X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
+            pred = model(X)
+            pred_arg = pred.argmax(1)
+            if len(adjacency_matrix)==0:
+                size_y = len(pred[0])
+                adjacency_matrix = np.array([[0 for i in range(size_y)] for j in range(size_y)])
+            test_loss += loss_fn(pred, y).item()
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            for i in range(size_y):
+                for j in range(size_y):
+                    adjacency_matrix[i][j] += int(((pred_arg==i) & (y_pred==j)).sum())
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    # run.log({"acc" : correct, "loss":test_loss})
+    return adjacency_matrix
+
 
 class CMNISTNeuralNetwork(nn.Module):
     def __init__(self):

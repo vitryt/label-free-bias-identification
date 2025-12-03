@@ -282,7 +282,7 @@ def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cp
             if bias_label in concept_engines:
                 concept_engine = concept_engines[bias_label]
             else:
-                raise KeyError(f"the bias labeled {bias_label} has no attributed concept devcomposer device")
+                raise KeyError(f"the bias labeled {bias_label} has no attributed concept decomposer device")
         results[bias_label] = {}
         for Xunbiased, Xbiased, y in bias_dataloader:
             # y_predi = (model(X.cuda()).cpu())
