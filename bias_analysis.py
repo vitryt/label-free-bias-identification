@@ -53,7 +53,7 @@ concept_id = args.concept_id
 # number_of_concept = args.number_of_concept
 # patch_size = args.patch_size
 # concept_dataset_size = args.concept_dataset_size
-bias_labels = range(10)
+bias_labels = range(10) # TODO Kieran remove this hardcoded value to replace with the size of the output
 
 data_path = args.data_path
 if data_path == "":
@@ -111,7 +111,7 @@ else :
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "MNIST" else None).to(device)
+    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "MNIST" else None).to(device) # TODO Kieran modify so that the network is a parameter
     assert(os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"))
     model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
 
@@ -146,7 +146,7 @@ else :
             concept_engines[label].reducer = concept_parameters["concept_parameters"][label]["reducer"]
             concept_engines[label].W = np.array(concept_parameters["concept_parameters"][label]["W"], dtype=np.float32)
 
-    bias_dataloaders = {
+    bias_dataloaders = { # TODO Kieran, modify so that the dataloader is a variable and can be waterbirds
         bias_label: get_bias_difference_mnist_dataloader(root=data_path, batch_size=batch_size, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed, bias_colour=bias_label)[1]
         for bias_label in bias_labels}
 

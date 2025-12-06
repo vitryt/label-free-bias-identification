@@ -21,7 +21,7 @@ def train_concept_engines(dataloader, model, layer_depth, number_of_concept, con
     concept_datasets = {}
     model.eval()
     model.zero_grad()
-    for X, _, _ in dataloader:
+    for X, _, _ in dataloader: # TODO Kieran find solution so that the dataloader can have two or three values
         y = model(X.to(device)).cpu().argmax(1)
         for label in y.unique():
             label = int(label)

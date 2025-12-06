@@ -20,6 +20,7 @@ import numpy as np
 
 sys.path.append(os.getcwd())
 
+# TODO Kieran add arguments for the dataset, model and optimizer
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_id", type=int, default=0)
 parser.add_argument("--model_name", type=str, default="MNIST")
@@ -63,6 +64,7 @@ result_path += f"model_{model_id}.pkl"
 if os.path.exists(result_path):
     with open(result_path, "rb") as f:
         parameters = pkl.load(f)
+    # TODO add the new parameters here
     batch_size = parameters["batch_size"]
     train_correlation = parameters["train_correlation"]
     test_correlation = parameters["test_correlation"]
@@ -70,7 +72,7 @@ if os.path.exists(result_path):
     split_seed = parameters["split_seed"]
     shuffle_seed = parameters["shuffle_seed"]
 else:
-    parameters = {
+    parameters = { # TODO Kieran add the new parameters here
         "model_id":model_id,
         "model_name":model_name,
         "batch_size":batch_size,
@@ -101,14 +103,15 @@ else :
 
     model = (mu.CMNISTNeuralNetwork() if parameters["model_name"] == "MNIST" else None).to(device) # TODO Change so that the model is a parameter
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3) # TODO Change this so that the optimizer is a parameter
-    
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3) # TODO Change this so that the optimizer is a parameter
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+
     accuracy_matrixes = []
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
         mu.train(train_dataloader, model, loss_fn, optimizer, device=device)
         print("                                            ")
-        correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device)
+        correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device) # TODO change to use a different test function in case you modified that
     
     torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
 

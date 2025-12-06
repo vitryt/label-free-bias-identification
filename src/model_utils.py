@@ -6,7 +6,7 @@ import torch
 def train(dataloader, model, loss_fn, optimizer, device="cpu"):
     size = len(dataloader.dataset)
     model.train()
-    for batch, (X, y, _) in enumerate(dataloader):
+    for batch, (X, y, _) in enumerate(dataloader): # TODO Kieran change so that the dataloader can have only two values
         X, y = X.to(device), y.to(device)
 
         # Compute prediction error
@@ -31,7 +31,7 @@ def test(dataloader, model, loss_fn, device="cpu"):
     appearance_matrix = []
     correctness_matrix = None
     with torch.no_grad():
-        for X, y, y_pred in dataloader:
+        for X, y, y_pred in dataloader: # TODO change so that the dataloader can have only two values (but then you might have to just make a new function)
             X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
             pred = model(X)
             if len(appearance_matrix)==0:
@@ -51,6 +51,7 @@ def test(dataloader, model, loss_fn, device="cpu"):
     return correctness_matrix, appearance_matrix
 
 def adjacency_test(dataloader, model, loss_fn, device="cpu"):
+    # Does not work with dataset where the bias is not given
     size = len(dataloader.dataset)
     num_batches = len(dataloader)
     model.eval()
