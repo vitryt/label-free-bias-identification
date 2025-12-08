@@ -185,8 +185,8 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
         X = batch[0].to(device)
         y = batch[1]
 
-        activation = concept_engine.input_to_latent(X.to(device))
-        y_logits = (concept_engine.latent_to_logit(activation).cpu())
+        activation = concept_engine.input_to_latent(X.to(device).cpu())
+        y_logits = (concept_engine.latent_to_logit(activation.to(device)).cpu())
 
         if output_size == 0:
             output_size = len(y_logits[0])
@@ -209,28 +209,30 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
                 back_mult=backprop_mult,
                 device=device,
                 activation=act_w,
-        )
-
-        if activation_wrong is None:
-            activation_wrong = act_w
-            y_wrong = y_w
-            y_predi_wrong = yp_w
-            backprop_wrong = bp_w
-        else:
-            activation_wrong = torch.cat([activation_wrong, act_w])
-            y_wrong = torch.cat([y_wrong, y_w])
-            y_predi_wrong = torch.cat([y_predi_wrong, yp_w])
-            backprop_wrong = torch.cat([backprop_wrong, bp_w])
+            )
+            if activation_wrong is None:
+                activation_wrong = act_w
+                y_wrong = y_w
+                y_predi_wrong = yp_w
+                backprop_wrong = bp_w
+            else:
+                activation_wrong = torch.cat([activation_wrong, act_w])
+                y_wrong = torch.cat([y_wrong, y_w])
+                y_predi_wrong = torch.cat([y_predi_wrong, yp_w])
+                backprop_wrong = torch.cat([backprop_wrong, bp_w])
 
     if activation_wrong is None or y_wrong is None:
         return results
     
     if not multi_concept:
-        if len(y_wrong > 0):
+        if len(y_wrong) > 0:
             m = concept_engine.number_of_concepts
             for i in range(output_size):
                 studied_index = np.array(range(len(y_wrong)))[y_wrong==i]
                 n = len(studied_index)
+                if n == 0:
+                    continue
+
                 k = n
                 batch_activation = []
                 batch_backprop = []
