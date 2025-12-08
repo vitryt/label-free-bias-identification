@@ -169,7 +169,7 @@ for backprop_step in backprop_steps:
         loss_fn,
         {"all": craft},
         gr,
-        backprop_multi = backprop_step,
+        backprop_mult = backprop_step,
         device = device
     )
     print(f"-Concepts with backprop step {backprop_step} gathered successfully")

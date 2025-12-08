@@ -15,27 +15,60 @@ class Gradient_retriever():
         self.handle.remove()
 
 
-def train_concept_engines(dataloader, model, layer_depth, number_of_concept, concept_decomposer, patch_size, concept_dataset_size=3000, batch_size=256, device="cpu"):
+def train_concept_engines(
+        dataloader, 
+        model, 
+        layer_depth, 
+        number_of_concept, 
+        concept_decomposer, 
+        patch_size, 
+        concept_dataset_size=3000, 
+        batch_size=256, 
+        device="cpu"
+    ):
+    """
+    Training a class conditional concept engine for each of the predicted classes of a dataset
+
+    Irregardless of the dataloader the function can be passed (X, y) or (X, y, a) or (X, y, a, g)
+    supporting both the CMNIST model and Waterbird models.
+    """
     concept_engines = {}
     concept_parameters = {}
     concept_datasets = {}
+
     model.eval()
     model.zero_grad()
-    for X, _, _ in dataloader: # TODO Kieran find solution so that the dataloader can have two or three values
-        y = model(X.to(device)).cpu().argmax(1)
-        for label in y.unique():
+
+    # TODO Kieran find solution so that the dataloader can have two or three values
+    # Building the per class concept datasets
+    for batch in dataloader: 
+        X = batch[0].to(device)
+        y_hat = model(X).cpu().argmax(1) # Using models predicted label to form concept dataset
+
+        for label in y_hat.unique():
             label = int(label)
+            class_X = X[y_hat == label].cpu() # Storing on the CPUT for CRAFT use
+
             if not label in concept_datasets:
                 print(f"------------------------------------Added label {label}")
-                concept_datasets[label] = X[y==label]
+                concept_datasets[label] = class_X
             elif len(concept_datasets[label]) < concept_dataset_size:
-                concept_datasets[label] = torch.cat([concept_datasets[label], X[y==label]])
-    g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
-    h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
+                concept_datasets[label] = torch.cat([concept_datasets[label], class_X])
+    
+    # Concept Decomoposition
+    if hasattr(model, "backbone"):
+         backbone = model.backbone
+         g = nn.Sequential(*list(backbone.children())[:-1]) # Layers pre concept decomposition
+         h = nn.Sequential(nn.Flatten(), backbone.fc) # Layers post concept decompositon
+    else:
+        g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition (CMNIST version)
+        h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon (CMNIST version)
+
     for label, dataset in concept_datasets.items():
         print(f"Training concept decomposer for class {label}")
-        if len(dataset > concept_dataset_size):
+        if len(dataset) > concept_dataset_size:
             dataset = dataset[:concept_dataset_size]
+
         concept_engines[label] = concept_decomposer(
             input_to_latent=g,
             latent_to_logit = h,
@@ -48,6 +81,7 @@ def train_concept_engines(dataloader, model, layer_depth, number_of_concept, con
         concept_parameters[label]["crops"], concept_parameters[label]["crops_u"], concept_parameters[label]["W"] = concept_engines[label].fit(concept_datasets[label])
         concept_parameters[label]["reducer"] = concept_engines[label].reducer
         concept_parameters[label]["crops"] = np.moveaxis(torch_to_numpy(concept_parameters[label]["crops"]), 1, -1)
+
     return concept_engines, concept_parameters
 
 
@@ -59,12 +93,15 @@ def get_backprop(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_
     - pos_concept_diff : the concept activation in the direction of the backpropagated gradient ascent
     """
     if activation == None:
-        activation = concept_engine.input_to_latent(X.cuda()).cpu()
+        activation = concept_engine.input_to_latent(X.to(device)).cpu()
+
     model.eval()
     model.zero_grad()
+
     outpt = concept_engine.latent_to_logit(activation.to(device)).cpu()
     loss = loss_fn(outpt, y)
     loss.backward()
+
     return gradient_recoverer.grad * back_mult
 
 
@@ -77,6 +114,7 @@ def get_backprop_concepts(X, y, model, loss_fn, concept_engine, gradient_recover
     """
     if activation == None:
         activation = concept_engine.input_to_latent(X.cuda()).cpu()
+
     concept_activation = concept_engine.transform(inputs=None, activations=activation)
     # model.eval()
     # model.zero_grad()
@@ -94,54 +132,99 @@ def get_backprop_concepts(X, y, model, loss_fn, concept_engine, gradient_recover
         device=device,
         activation=activation
         )
+    
     modified_activation = activation - back_activation
     modified_activation[(modified_activation) < 0] = 0
     back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
     neg_concept_diff = back_concept_activation +1 -1
+
     # neg_concept_diff = (back_concept_activation - concept_activation)
+
     modified_activation = activation + back_activation
     modified_activation[(modified_activation) < 0] = 0
     back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
     pos_concept_diff = back_concept_activation +1 -1
+
     # pos_concept_diff = (back_concept_activation - concept_activation)
+
     return concept_activation, neg_concept_diff, pos_concept_diff
 
 
 def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, gradient_recoverer, backprop_mult=1, device="cpu", multi_concept=False):
+    """
+    Aggregating all concept activations and backprop differences for misclassfied samples
+
+    Concept engines can be either:
+    * A signle CRAFT engine
+    * A dictionary for class conditional engines
+
+    Dataloader may pass: (X, y) or (X, y, a) or (X, y, a, g)
+    """
+    if isinstance(concept_engines, dict):
+        if len(concept_engines) == 0:
+            raise ValueError("Concept engines dictionary is empty !")
+        concept_engine = next(iter(concept_engines.values()))
+    else:
+        concept_engine = concept_engines
+
     results = {}
-    concept_engine = list(concept_engines.values())[0]
+    # concept_engine = list(concept_engines.values())[0]
     output_size = 0
-    activation_wrong = torch.ByteTensor().to(device)
-    y_wrong = torch.LongTensor()
-    y_predi_wrong = torch.ByteTensor()
-    backprop_wrong = torch.ByteTensor().to(device)
-    for X, y, _ in dataloader:
+
+    # activation_wrong = torch.ByteTensor().to(device)
+    # y_wrong = torch.LongTensor()
+    # y_predi_wrong = torch.ByteTensor()
+    # backprop_wrong = torch.ByteTensor().to(device)
+
+    activation_wrong = None
+    y_wrong = None
+    y_predi_wrong = None
+    backprop_wrong = None
+
+    for batch in dataloader:
+        X = batch[0].to(device)
+        y = batch[1]
+
         activation = concept_engine.input_to_latent(X.to(device))
-        y_predi = (concept_engine.latent_to_logit(activation).cpu())
+        y_logits = (concept_engine.latent_to_logit(activation).cpu())
+
         if output_size == 0:
-            output_size = len(y_predi[0])
+            output_size = len(y_logits[0])
             results = {}
-        y_predi = y_predi.argmax(dim=1)
+
+        y_predi = y_logits.argmax(dim=1)
         wrongly_classified = (y_predi != y)
-        activation_wrong = torch.cat([activation_wrong, activation[wrongly_classified]])
-        y_wrong = torch.cat([y_wrong, y[wrongly_classified]])
-        y_predi_wrong = torch.cat([y_predi_wrong, y_predi[wrongly_classified]])
-        backprop_wrong = torch.cat(
-            [
-                backprop_wrong,
-                get_backprop(
-                    X = None,
-                    y = y[wrongly_classified],
-                    model = model,
-                    loss_fn = loss_fn,
-                    concept_engine = concept_engine,
-                    gradient_recoverer = gradient_recoverer,
-                    back_mult=backprop_mult,
-                    device=device,
-                    activation=activation[wrongly_classified]
-                    )
-            ]
+
+        if wrongly_classified.any():
+            act_w = activation[wrongly_classified]
+            y_w = y[wrongly_classified]
+            yp_w = y_predi[wrongly_classified]
+            bp_w = get_backprop(
+                X=None,
+                y=y_w,
+                model=model,
+                loss_fn=loss_fn,
+                concept_engine=concept_engine,
+                gradient_recoverer=gradient_recoverer,
+                back_mult=backprop_mult,
+                device=device,
+                activation=act_w,
         )
+
+        if activation_wrong is None:
+            activation_wrong = act_w
+            y_wrong = y_w
+            y_predi_wrong = yp_w
+            backprop_wrong = bp_w
+        else:
+            activation_wrong = torch.cat([activation_wrong, act_w])
+            y_wrong = torch.cat([y_wrong, y_w])
+            y_predi_wrong = torch.cat([y_predi_wrong, yp_w])
+            backprop_wrong = torch.cat([backprop_wrong, bp_w])
+
+    if activation_wrong is None or y_wrong is None:
+        return results
+    
     if not multi_concept:
         if len(y_wrong > 0):
             m = concept_engine.number_of_concepts
@@ -151,12 +234,13 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
                 k = n
                 batch_activation = []
                 batch_backprop = []
-                for j in range(k):
+                for _ in range(k):
                     batch_indices = np.random.choice(studied_index, m)
                     batch_activation.append(activation_wrong[batch_indices].mean(axis=0))
                     batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
                 batch_activation = torch.stack(batch_activation)
                 batch_backprop = torch.stack(batch_backprop)
+
                 concept_activation = concept_engine.transform(inputs=None, activations=batch_activation)
                 modified_activation = batch_activation - batch_backprop
                 modified_activation[(modified_activation) < 0] = 0
@@ -167,6 +251,7 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
                 modified_activation[(modified_activation) < 0] = 0
                 back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
                 concept_ascent = back_concept_activation +1 -1
+
                 results[i] = {
                     "concept_base":concept_activation,
                     "concept_descent":concept_descent,
@@ -182,12 +267,13 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
             k = n
             batch_activation = []
             batch_backprop = []
-            for j in range(k):
+            for _ in range(k):
                 batch_indices = np.random.choice(studied_index, m)
                 batch_activation.append(activation_wrong[batch_indices].mean(axis=0))
                 batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
             batch_activation = torch.stack(batch_activation)
             batch_backprop = torch.stack(batch_backprop)
+
             concept_activation = concept_engines[label].transform(inputs=None, activations=batch_activation)
             modified_activation = batch_activation - batch_backprop
             modified_activation[(modified_activation) < 0] = 0
@@ -245,21 +331,34 @@ def analyze_results(results, i, number_of_concept):
 
 
 def get_bias_concept(results, studied_class, number_of_concepts):
-    n_added_bias, n_removed_bias, n_appearance, p_removed_bias, p_appearance = analyze_results(results, studied_class, number_of_concept=number_of_concepts)
-    na_biases = {}
-    for i, val in enumerate(n_added_bias/n_appearance):
-        na_biases[i]= val
-    nr_biases = {}
-    for i, val in enumerate(n_removed_bias):
-        nr_biases[i]= val
-    pr_biases = {}
-    for i, val in enumerate(p_removed_bias/p_appearance):
-        pr_biases[i]= val
-    ultimate_bias = {}
-    for key, val in na_biases.items():
-        ultimate_bias[key]= val - pr_biases[key]
-    return ultimate_bias
+    # n_added_bias, n_removed_bias, n_appearance, p_removed_bias, p_appearance = analyze_results(results, studied_class, number_of_concept=number_of_concepts)
+    # na_biases = {}
+    # for i, val in enumerate(n_added_bias/n_appearance):
+    #     na_biases[i]= val
+    # nr_biases = {}
+    # for i, val in enumerate(n_removed_bias):
+    #     nr_biases[i]= val
+    # pr_biases = {}
+    # for i, val in enumerate(p_removed_bias/p_appearance):
+    #     pr_biases[i]= val
+    # ultimate_bias = {}
+    # for key, val in na_biases.items():
+    #     ultimate_bias[key]= val - pr_biases[key]
 
+    stats = analyze_results(results, studied_class, number_of_concepts)
+    appearance = stats["data_size"]
+
+    n_added_concept = stats["descent_added_concept"]
+    n_removed_concept = stats["descent_removed_concept"]
+    p_removed_concept = stats["ascent_removed_concept"]
+
+    na_biases = {i: (val / appearance) for i, val in enumerate(n_added_concept)}
+    nr_biases = {i: val for i, val in enumerate(n_removed_concept)}
+    pr_biases = {i: (val / appearance) for i, val in enumerate(p_removed_concept)}
+
+    ultimate_bias = {i: na_biases[i] - pr_biases[i] for i in na_biases}
+
+    return ultimate_bias
 
 
 def get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device="cpu"):
@@ -272,6 +371,7 @@ def get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device="cpu"):
     biased_concept_activation = concept_engine.transform(inputs=None, activations=biased_activation)
 
     return unbiased_concept_activation, biased_concept_activation
+
 
 def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cpu"):
     concept_engine = list(concept_engines.values())[0]
@@ -299,8 +399,8 @@ def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cp
                 label = int(label)
                 if label in results[bias_label]:
                     results[bias_label][label] = (
-                                    np.concat((results[bias_label][label][0], unbiased_concept_activation[y == label])),
-                                    np.concat((results[bias_label][label][1], biased_concept_activation[y == label]))
+                                    np.concatenate((results[bias_label][label][0], unbiased_concept_activation[y == label])),
+                                    np.concatenate((results[bias_label][label][1], biased_concept_activation[y == label]))
                                     )
                 else :
                     results[bias_label][label] = (
@@ -308,8 +408,6 @@ def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cp
                         biased_concept_activation[y==label]
                     )
     return results
-
-
 
 
 def get_backprop_activations(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_mult = 1, device="cpu"):
@@ -321,22 +419,29 @@ def get_backprop_activations(X, y, model, loss_fn, concept_engine, gradient_reco
     """
     activation = concept_engine.input_to_latent(X.cuda()).cpu()
     concept_activation = concept_engine.transform(inputs=None, activations=activation)
+
     model.eval()
     model.zero_grad()
+    
     outpt = model(X.to(device)).cpu()
     loss = loss_fn(outpt, y)
     loss.backward()
+
     back_activation = gradient_recoverer.grad.cpu()
     modified_activation = activation - (back_activation * back_mult)
     modified_activation[(modified_activation) < 0] = 0
     back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
     neg_concept_diff = back_concept_activation +1 -1
+
     # neg_concept_diff = (back_concept_activation - concept_activation)
+
     modified_activation = activation + (back_activation * back_mult)
     modified_activation[(modified_activation) < 0] = 0
     back_concept_activation = concept_engine.transform(inputs=None, activations = modified_activation)
     pos_concept_diff = back_concept_activation +1 -1
+
     # pos_concept_diff = (back_concept_activation - concept_activation)
+
     return concept_activation, neg_concept_diff, pos_concept_diff
 
 
