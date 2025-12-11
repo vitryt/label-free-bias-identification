@@ -31,7 +31,7 @@ def train(dataloader, model, loss_fn, optimizer, device="cpu"):
         optimizer.step()
         optimizer.zero_grad()
 
-        if batch % 100 == 0:
+        if batch % 10 == 0:
             loss, current = loss.item(), (batch + 1) * len(X)
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]", end="\r")
 
@@ -115,14 +115,10 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
             if isinstance(batch_data, (list, tuple)):
                 X = batch_data[0]
                 y = batch_data[1]
-                if len(batch_data) >= 3:
-                    y_pred = batch_data[2]
-                else:
-                    y_pred = y
             else:
                 raise ValueError(f"Unexpected batch type received in adjancency test loop ! {type(batch_data)}")
             
-            X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
+            X, y = X.to(device), y.to(device)
             pred = model(X)
             pred_arg = pred.argmax(1)
             
@@ -135,7 +131,7 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
 
             for i in range(size_y):
                 for j in range(size_y):
-                    adjacency_matrix[i][j] += int(((pred_arg==i) & (y_pred==j)).sum())
+                    adjacency_matrix[i][j] += int(((pred_arg==i) & (y==j)).sum())
 
     test_loss /= num_batches
     correct /= size

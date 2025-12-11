@@ -26,6 +26,8 @@ from src.waterbird import WaterBirdsDataset
 from src.resnet18_utils import WaterbirdsResNet18
 from src.resnet50_utils import WaterbirdsResNet50
 
+#! /usr/bin/env python3
+
 logging.getLogger('tensorflow').disabled = True
 sys.path.append(os.getcwd())
 
@@ -61,8 +63,7 @@ backprop_steps = [1, 10, 30, 70, 100, 300, 700, 1000]
 # if data_path == "":
 #     data_path = os.getcwd()
 # data_path += "/data/" + model_name
-data_path = args.data_path or os.getcwd()
-data_path += "/data/" + model_name
+
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
@@ -81,9 +82,14 @@ with open(model_result_path, "rb") as f:
 batch_size = model_parameters["batch_size"]
 split_seed = model_parameters["split_seed"]
 shuffle_seed = model_parameters["shuffle_seed"]
+dataset = model_parameters["dataset"]
+model_type = model_parameters["model_type"]
+
+data_path = args.data_path or os.getcwd()
+data_path += "/data/" + dataset
 
 # Specifying dataset loader
-if model_name == "MNIST":
+if dataset == "MNIST":
     train_loader, val_loader = get_biased_mnist_dataloader(
         root = data_path,
         batch_size = batch_size,
@@ -93,7 +99,7 @@ if model_name == "MNIST":
         split_gen_seed = split_seed,
         shuffle_seed = shuffle_seed
     )
-else:
+if dataset == "Waterbirds":
     train_loader = WaterBirdsDataset(
         root_dir = data_path,
         split = "train"
@@ -114,17 +120,17 @@ else:
     )
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-if model_name == "MNIST":
+if model_type == "MLP":
     model = mu.CMNISTNeuralNetwork()
-elif model_name == "Waterbirds18":
+elif model_type == "resnet18":
     model = WaterbirdsResNet18()
-elif model_name == "Waterbirds50":
+elif model_type == "resnet50":
     model = WaterbirdsResNet50()
 else:
-    raise ValueError(f"Unknown model name: {model_name}")
+    raise ValueError(f"Unknown model type: {model_type}")
 
 model = model.to(device)
-model.load_state_dict(torch.load(model_result_path))
+model.load_state_dict(torch.load(os.path.join(result_path,f"model_{model_id}")))
 
 loss_fn = nn.CrossEntropyLoss()
 
@@ -144,7 +150,7 @@ if model_name == "MNIST":
     h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
 else:
     g = nn.Sequential(*(list(model.backbone.children())[:-1])) # Layers pre concept decomposition
-    h = nn.Sequential(nn.Flatten(), model.backbone.fc) # Layers post concept decompositon
+    h = nn.Sequential(model.backbone.fc) # Layers post concept decompositon
 
 craft = Craft(
     input_to_latent=g,

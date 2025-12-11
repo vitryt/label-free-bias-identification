@@ -54,10 +54,15 @@ epochs = args.epochs
 split_seed = args.split_seed
 shuffle_seed = args.shuffle_seed
 
+
+dataset = args.dataset
+model_type = args.model_type
+optimizer_type = args.optimizer
+
 data_path = args.data_path
 if data_path == "":
     data_path = os.getcwd()
-data_path += "/data/" + model_name
+data_path += "/data/" + dataset
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -80,8 +85,6 @@ if os.path.exists(result_path):
     epochs = parameters["epochs"]
     split_seed = parameters["split_seed"]
     shuffle_seed = parameters["shuffle_seed"]
-
-    # Addition parameters for Waterbirds, ResNet and modularity
     dataset = parameters.get("dataset", "MNIST")
     model_type = parameters.get("model_type", "MLP")
     optimizer_type = parameters.get("optimizer", "sgd")
@@ -114,7 +117,7 @@ else :
     # TODO Change so that the datasets are a parameter
     # train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
     # test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
-
+    test_func = mu.adjacency_test
     if args.dataset == "MNIST":
         train_dataloader, validation_dataloader = get_biased_mnist_dataloader(
             root = data_path, 
@@ -132,6 +135,7 @@ else :
             train = False, 
             shuffle_seed = shuffle_seed
         )
+        test_func = mu.test
     elif args.dataset == "Waterbirds":
         transform = None  # Using default
         train_dataloader = DataLoader(WaterBirdsDataset(data_path, "train", transform), batch_size = batch_size, shuffle = True)
@@ -171,12 +175,11 @@ else :
         print(f"Epoch {t+1}\n-------------------------------")
         mu.train(train_dataloader, model, loss_fn, optimizer, device=device)
         print("                                            ")
-        correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device) # TODO change to use a different test function in case you modified that
+        adjacency_matrix = test_func(test_dataloader, model, loss_fn, device=device) # TODO change to use a different test function in case you modified that
     
     torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
 
-    parameters["correctness_matrix"] = correctness_matrix
-    parameters["appearance_matrix"] = appearance_matrix
+    parameters["result_matrix"] = adjacency_matrix
 
     with open(result_path, "wb") as f:
         pkl.dump(parameters, f)
