@@ -3,18 +3,23 @@ import sys
 import pickle as pkl
 import os
 import random
+import wandb
+import numpy as np
 
 import torch
-from src.colour_mnist import get_biased_mnist_dataloader
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 import src.model_utils as mu
 
-import wandb
+# Dataset imports --> we could move to conditional statements
+from src.colour_mnist import get_biased_mnist_dataloader # Coloured MNIST
+from src.waterbird import WaterBirdsDataset # Waterbirds
 
-import numpy as np
+# Model imports --> we could move to conditional statements
+from src.resnet18_utils import WaterbirdsResNet18
+from src.resnet50_utils import WaterbirdsResNet50
 
 
 
@@ -34,6 +39,11 @@ parser.add_argument("--gpu_id", type=str, default="0")
 parser.add_argument("--result_path", type=str, default="")
 parser.add_argument("--data_path", type=str, default="")
 
+# Updated arguments for introduction of Waterbirds dataset, ResNet models and modularity
+parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds"]) # Add CelebA down the line
+parser.add_argument("--model_type", type=str, default="MLP", choices=["MLP", "resnet18", "resnet50"])
+parser.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam", "adamw"])
+
 args = parser.parse_args()
 
 model_id = args.model_id
@@ -44,6 +54,10 @@ test_correlation = args.test_correlation
 epochs = args.epochs
 split_seed = args.split_seed
 shuffle_seed = args.shuffle_seed
+
+dataset = args.dataset
+model_type = args.model_type
+optimizer_type = args.optimizer
 
 data_path = args.data_path
 if data_path == "":
@@ -95,16 +109,55 @@ else :
     # )
 
     # TODO Change so that the datasets are a parameter
-    train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
-    test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
+    # train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
+    # test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
+    test_func = mu.test
+    if args.dataset == "MNIST":
+        train_dataloader, validation_dataloader = get_biased_mnist_dataloader(
+            root = data_path, 
+            batch_size = batch_size, 
+            data_label_correlation = train_correlation,
+            train = True, 
+            validation = 1/10, 
+            split_gen_seed = split_seed, 
+            shuffle_seed = shuffle_seed
+        )
+        test_dataloader = get_biased_mnist_dataloader(
+            root = data_path, 
+            batch_size = batch_size, 
+            data_label_correlation = test_correlation,
+            train = False, 
+            shuffle_seed = shuffle_seed
+        )
+    elif args.dataset == "Waterbirds":
+        transform = None  # Using default
+        train_dataloader = DataLoader(WaterBirdsDataset(data_path, "train", transform), batch_size = batch_size, shuffle = True)
+        validation_dataloader = DataLoader(WaterBirdsDataset(data_path, "val", transform), batch_size = batch_size)
+        test_dataloader = DataLoader(WaterBirdsDataset(data_path, "test", transform), batch_size = batch_size)
+
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if parameters["model_name"] == "MNIST" else None).to(device) # TODO Change so that the model is a parameter
+    if args.model_type == "MLP":
+        model = mu.CMNISTNeuralNetwork().to(device)
+    elif args.model_type == "resnet18":
+        model = WaterbirdsResNet18(num_classes = 2).to(device)
+    elif args.model_type == "resnet50":
+        model = WaterbirdsResNet50(num_classes = 2).to(device)
+    else:
+        raise ValueError("Not a defined model being specified in model_training.py!")
+    model=model.to(device)
     loss_fn = nn.CrossEntropyLoss()
     # optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3) # TODO Change this so that the optimizer is a parameter
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    if args.optimizer == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr = 1e-3)
+    elif args.optimizer == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
+    elif args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr = 1e-3)
+    else:
+        raise ValueError("Not a defined optimiser being specified in model_training.py!")
 
     accuracy_matrixes = []
     for t in range(epochs):

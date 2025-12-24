@@ -1,13 +1,14 @@
-
 import argparse
 import sys
 import pickle as pkl
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import random
+import numpy as np
+# import wandb
+import logging
 
 import torch
-from src.colour_mnist import get_biased_mnist_dataloader
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -16,11 +17,15 @@ from craft.craft_torch import Craft, torch_to_numpy
 import src.model_utils as mu
 import src.concept_utils as cu
 
-# import wandb
+# Dataset imports
+from src.colour_mnist import get_biased_mnist_dataloader
+from src.waterbird import WaterBirdsDataset
 
-import numpy as np
+# Model imports
+from src.resnet18_utils import WaterbirdsResNet18
+from src.resnet50_utils import WaterbirdsResNet50
 
-import logging
+
 logging.getLogger('tensorflow').disabled = True
 
 sys.path.append(os.getcwd())
@@ -58,7 +63,6 @@ backprop_steps = [1, 10, 30, 70, 100, 300, 700, 1000]
 data_path = args.data_path
 if data_path == "":
     data_path = os.getcwd()
-data_path += "/data/" + model_name
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -75,6 +79,8 @@ if os.path.exists(model_result_path):
     test_correlation = model_parameters["test_correlation"]
     split_seed = model_parameters["split_seed"]
     shuffle_seed = model_parameters["shuffle_seed"]
+    dataset = model_parameters["dataset"]
+    model_type = model_parameters["model_type"]
 else:
     print("Error ! You need to train the model before being able to test it !")
     raise FileExistsError(model_result_path)
@@ -101,21 +107,64 @@ else :
     #     config=parameters,
     # )
 
-    train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
-    test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
+    # Specifying dataset loader
+    if dataset == "MNIST":
+        training_dataloader, validation_dataloader = get_biased_mnist_dataloader(
+            root = data_path,
+            batch_size = batch_size,
+            data_label_correlation = model_parameters["train_correlation"],
+            train = True,
+            validation = 1/10,
+            split_gen_seed = split_seed,
+            shuffle_seed = shuffle_seed
+        )
+    if dataset == "Waterbirds":
+        training_data = WaterBirdsDataset(
+            root_dir = data_path,
+            split = "train"
+        )
+        validation_data = WaterBirdsDataset(
+            root_dir = data_path,
+            split = "val"
+        )
+        training_dataloader = DataLoader(
+            training_data,
+            batch_size = batch_size,
+            shuffle = True
+        )
+        validation_dataloader = DataLoader(
+            validation_data,
+            batch_size = batch_size,
+            shuffle = False
+        )
+
+
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "MNIST" else None).to(device)
+    if model_type == "MLP":
+        model = mu.CMNISTNeuralNetwork()
+    elif model_type == "resnet18":
+        model = WaterbirdsResNet18()
+    elif model_type == "resnet50":
+        model = WaterbirdsResNet50()
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+
+    model = model.to(device)
     assert(os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"))
     model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
 
     loss_fn = nn.CrossEntropyLoss()
 
     if not args.multi_concept:
-        g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
-        h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
+        if model_name == "MNIST":
+            g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
+            h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
+        else:
+            g = nn.Sequential(*(list(model.backbone.children())[:-1] + [nn.Flatten(start_dim=1)])) # Layers pre concept decomposition
+            h = nn.Sequential(model.backbone.fc) # Layers post concept decompositon
 
         craft = Craft(
             input_to_latent=g,
@@ -128,7 +177,8 @@ else :
 
         print(f"-Training the concept decomposition", end="\r")
         concept_dataset = torch.Tensor([])
-        for X, y, y_pred in validation_dataloader:
+        for batch in validation_dataloader:
+            X = batch[0]
             print(f"Building concept dataset {len(concept_dataset)}/{concept_dataset_size}", end="\r")
             if len(concept_dataset) >= concept_dataset_size:
                 break
@@ -179,7 +229,7 @@ else :
             device=device,
         )
         print("-Concept decomposition trained successfully")
-        gr = cu.Gradient_retriever(list(model.children())[layer_depth-1])
+        gr = cu.Gradient_retriever(model.backbone.fc if hasattr(model, "backbone") else list(model.children())[layer_depth-1])
 
         results = {}
         for backprop_step in backprop_steps:

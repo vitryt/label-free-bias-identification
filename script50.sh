@@ -2,10 +2,10 @@ declare -a random_seeds=( 23 45 67 82 12 78 128 489 11 629 73 198 74 26 50 52 95
 declare -a number_of_concepts=( 5 10 20 )
 declare -a patch_sizes=( 25 50 )
 dataset="Waterbirds"
-model_type="resnet18"
-model_name="Waterbirds18"
+model_type="resnet50"
+model_name="Waterbirds50"
 optimizer="adam"
-gpu_id="7"
+gpu_id="6"
 result_path="/data/4vitry/"
 data_path="/data/4vitry/"
 
