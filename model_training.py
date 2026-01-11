@@ -62,7 +62,7 @@ optimizer_type = args.optimizer
 data_path = args.data_path
 if data_path == "":
     data_path = os.getcwd()
-data_path += "/data/" + model_name
+data_path += "/data/" + dataset
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -95,6 +95,9 @@ else:
         "epochs":epochs,
         "split_seed":split_seed,
         "shuffle_seed":shuffle_seed,
+        "dataset":dataset,
+        "model_type": model_type,
+        "optimizer_type":optimizer_type,
     }
 
 if os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"):

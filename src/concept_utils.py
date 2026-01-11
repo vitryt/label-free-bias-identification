@@ -34,8 +34,8 @@ def train_concept_engines(dataloader, model, layer_depth, number_of_concept, con
 
     if hasattr(model, "backbone"):
          backbone = model.backbone
-         g = nn.Sequential(*list(backbone.children())[:-1]) # Layers pre concept decomposition
-         h = nn.Sequential(nn.Flatten(), backbone.fc) # Layers post concept decompositon
+         g = nn.Sequential(*(list(model.backbone.children())[:-1] + [nn.Flatten(start_dim=1)])) # Layers pre concept decomposition
+         h = nn.Sequential(backbone.fc) # Layers post concept decompositon
     else:
         g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition (CMNIST version)
         h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon (CMNIST version)
@@ -123,7 +123,8 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
     y_wrong = torch.LongTensor()
     y_predi_wrong = torch.ByteTensor()
     backprop_wrong = torch.ByteTensor().to(device)
-    for batch in dataloader:
+    for i, batch in enumerate(dataloader):
+        # print(f"Doing batch {i}                            ", end="\r")
         X = batch[0]
         y = batch[1]
 
@@ -194,21 +195,36 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
             batch_activation = []
             batch_backprop = []
             for j in range(k):
+                print(f"Generating datapoint {j}/{k}   ", end="\r")
                 batch_indices = np.random.choice(studied_index, m)
                 batch_activation.append(activation_wrong[batch_indices].mean(axis=0))
                 batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
             batch_activation = torch.stack(batch_activation)
             batch_backprop = torch.stack(batch_backprop)
-            concept_activation = concept_engines[label].transform(inputs=None, activations=batch_activation)
-            modified_activation = batch_activation - batch_backprop
-            modified_activation[(modified_activation) < 0] = 0
-            back_concept_activation = concept_engines[label].transform(inputs=None, activations = modified_activation)
-            concept_descent = back_concept_activation +1 -1
+            
+            batch_size = concept_engines[label].batch_size
+            batch_amount = len(batch_activation)/batch_size
+            batch_amount = int(batch_amount) + (1 if batch_amount != int(batch_amount) else 0)
+            batch_descents = []
+            batch_ascents = []
+            for batch_id in range(batch_amount):
+                print(f"Batch {batch_id}/{batch_amount}           ", end="\r")
+                if batch_id < batch_amount -1:
+                    batch_indices = range(batch_id * batch_size, (batch_id+1) * batch_size)
+                else:
+                    batch_indices = range(batch_id * batch_size, len(batch_activation))
+                
+                concept_activation = concept_engines[label].transform(inputs=None, activations=batch_activation[batch_indices])
+                modified_activation = batch_activation[batch_indices] - batch_backprop[batch_indices]
+                modified_activation[(modified_activation) < 0] = 0
+                back_concept_activation = concept_engines[label].transform(inputs=None, activations = modified_activation)
+                batch_descents.append(back_concept_activation +1 -1)
 
-            modified_activation = batch_activation + batch_backprop
-            modified_activation[(modified_activation) < 0] = 0
-            back_concept_activation = concept_engines[label].transform(inputs=None, activations = modified_activation)
-            concept_ascent = back_concept_activation +1 -1
+                modified_activation = batch_activation[batch_indices] + batch_backprop[batch_indices]
+                modified_activation[(modified_activation) < 0] = 0
+                back_concept_activation = concept_engines[label].transform(inputs=None, activations = modified_activation)
+                batch_ascents.append(back_concept_activation +1 -1)
+            concept_ascent, concept_descent = np.concatenate(batch_ascents), np.concatenate(batch_descents)
             results[label] = {
                 "concept_base":concept_activation,
                 "concept_descent":concept_descent,
