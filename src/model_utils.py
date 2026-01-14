@@ -61,6 +61,7 @@ def test(dataloader, model, loss_fn, device="cpu"):
                 X = batch_data[0]
                 y = batch_data[1]
                 if len(batch_data) >= 3:
+                    print("Bias found")
                     y_pred = batch_data[2]
                 else:
                     y_pred = y

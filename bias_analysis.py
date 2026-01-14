@@ -111,7 +111,7 @@ else :
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "MNIST" else None).to(device) # TODO Kieran modify so that the network is a parameter
+    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "CMNIST" else None).to(device) # TODO Kieran modify so that the network is a parameter
     assert(os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"))
     model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
 

@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_id", type=int, default=0)
 parser.add_argument("--model_name", type=str, default="MNIST")
 parser.add_argument("--batch_size", type=int, default=256)
-parser.add_argument("--train_correlation", type=float, default=0.8)
+parser.add_argument("--train_correlation", type=float, default=0.95)
 parser.add_argument("--test_correlation", type=float, default=0.1)
 parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--split_seed", type=int, default=42)
@@ -85,6 +85,9 @@ if os.path.exists(result_path):
     epochs = parameters["epochs"]
     split_seed = parameters["split_seed"]
     shuffle_seed = parameters["shuffle_seed"]
+    dataset = parameters["dataset"]
+    model_type = parameters["model_type"]
+    optimizer_type = parameters["optimizer"]
 else:
     parameters = { # TODO Kieran add the new parameters here
         "model_id":model_id,
@@ -168,9 +171,7 @@ else :
         mu.train(train_dataloader, model, loss_fn, optimizer, device=device)
         print("                                            ")
         correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device) # TODO change to use a different test function in case you modified that
-    
     torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
-
     parameters["correctness_matrix"] = correctness_matrix
     parameters["appearance_matrix"] = appearance_matrix
 

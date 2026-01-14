@@ -43,17 +43,22 @@ class WaterBirdsDataset(Dataset):
         """
         self.root_dir = Path(root_dir).expanduser().resolve() # Resolve and normalise root path
 
-        folder_loc = self.root_dir / "data" / "Waterbirds" / "waterbird_complete95_forest2water2"
-        fallback = self.root_dir / "waterbird_complete95_forest2water2" # If dataset folder provided directly
+        folder_loc = self.root_dir / "waterbird_complete95_forest2water2"
 
         if folder_loc.exists():
             self.dataset_dir = folder_loc
-        elif fallback.exists():
-            self.dataset_dir = fallback
         else:
             raise FileNotFoundError(
-                "Could not find the Waterbirds dataset files.\n"
-                f"Searched to no avail:\n  {folder_loc}\n  {fallback}\n"
+                f"Could not find the Waterbirds dataset files.\n Tried {folder_loc}"
+            )
+        
+        folder_loc = self.root_dir / "segmentations"
+
+        if folder_loc.exists():
+            self.segmentation_dir = folder_loc
+        else:
+            raise FileNotFoundError(
+                "Could not find the CUB segmentation files.\n"
             )
 
         self.metadata_path = self.dataset_dir / "metadata.csv"
@@ -75,9 +80,15 @@ class WaterBirdsDataset(Dataset):
                                      std=[0.229, 0.224, 0.225]),
             ])
         self.transform = transform
+        self.mask_transform = transforms.Compose([
+                transforms.Resize(resize_side),
+                transforms.CenterCrop(image_size),
+                transforms.ToTensor(),
+            ])
         self.return_group = return_group
 
         self.image_paths = []   # Path to Waterbird images
+        self.mask_paths = []    # Path to the CUB masks
         self.y = []             # Target labels
         self.a = []             # Spurious attribute i.e. land or water
         self.g = []             # Encoding class and background to single integer fro group information
@@ -99,12 +110,20 @@ class WaterBirdsDataset(Dataset):
                         raise FileNotFoundError(
                             f"Image not found:\n  {img_path}\n  (alternatively, tried {alt})"
                         )
+                
+                seg_path = self.segmentation_dir / row["img_filename"]
+                seg_path = str(seg_path).replace(".jpg", ".png")
+                if not os.path.exists(seg_path):
+                    raise FileNotFoundError(
+                        f"Segmentation not found:\n  {seg_path}\n"
+                    )
 
                 y = int(row["y"])       # Landbird (0) and Waterbird (1)
                 a = int(row["place"])   # Land (0) and Water (1)
                 g = 2 * y + a           # Group information
 
                 self.image_paths.append(img_path)
+                self.mask_paths.append(seg_path)
                 self.y.append(y)
                 self.a.append(a)
                 self.g.append(g)
@@ -126,17 +145,21 @@ class WaterBirdsDataset(Dataset):
             g (int): 2*y + a in {0,1,2,3}
         """
         img_path = self.image_paths[idx]
+        mask_path = self.mask_paths[idx]
 
         img = Image.open(img_path).convert("RGB") # Loading images as RGB and apply transforms
         img = self.transform(img)
+
+        mask = Image.open(mask_path).convert("L") # Loading images as RGB and apply transforms
+        mask = self.mask_transform(mask)
 
         y = self.y[idx]
         a = self.a[idx]
 
         if self.return_group:
             g = self.g[idx]
-            return img, y, a, g
-        return img, y, a
+            return img, y, a, g, mask
+        return img, y, a, mask
 
 
 # Dummy use:

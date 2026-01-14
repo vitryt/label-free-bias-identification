@@ -5,7 +5,7 @@ dataset="Waterbirds"
 model_type="resnet50"
 model_name="Waterbirds50"
 optimizer="adam"
-gpu_id="6"
+gpu_id="7"
 result_path="/data/4vitry/"
 data_path="/data/4vitry/"
 
@@ -19,7 +19,7 @@ do
         for patch_size_id in {0..1}
         do
             echo "Starting experiment : $model_id | $concept_id, $patch_size_id"
-            python bias_identifying.py --model_id $model_id --model_name $model_name --concept_id $concept_id"_"$patch_size_id --number_of_concept ${number_of_concepts[$concept_id]} --gpu_id $gpu_id --result_path $result_path --data_path $data_path --concept_dataset_size 1000 --multi_concept 1 --patch_size ${patch_sizes[$patch_size_id]}
+            python bias_identifying.py --model_id $model_id --model_name $model_name --concept_id $concept_id"_"$patch_size_id --number_of_concept ${number_of_concepts[$concept_id]} --gpu_id $gpu_id --result_path $result_path --data_path $data_path --concept_dataset_size 2000 --multi_concept 1 --patch_size ${patch_sizes[$patch_size_id]}
             # echo "Analysing biases : $model_id | $concept_id, $patch_size_id"
             # python bias_analysis.py --model_id $model_id --model_name $model --concept_id $concept_id"_"$patch_size_id --gpu_id $gpu_id --result_path $result_path --data_path $data_path --multi_concept 1
             # echo "Correlating biases : $model_id | $concept_id, $patch_size_id"

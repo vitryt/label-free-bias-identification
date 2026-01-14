@@ -58,7 +58,7 @@ number_of_concept = args.number_of_concept
 patch_size = args.patch_size
 concept_dataset_size = args.concept_dataset_size
 # backprop_step = args.backprop_step
-backprop_steps = [1, 10, 30, 70, 100, 300, 700, 1000]
+backprop_steps = [100, 300, 700, 1000]
 
 data_path = args.data_path
 if data_path == "":
@@ -84,6 +84,8 @@ if os.path.exists(model_result_path):
 else:
     print("Error ! You need to train the model before being able to test it !")
     raise FileExistsError(model_result_path)
+
+data_path += "/data/" + dataset
 
 result_path += f"concepts_{model_id}_{concept_id}.pkl"
 parameters = {
@@ -112,7 +114,7 @@ else :
         training_dataloader, validation_dataloader = get_biased_mnist_dataloader(
             root = data_path,
             batch_size = batch_size,
-            data_label_correlation = model_parameters["train_correlation"],
+            data_label_correlation = 0.1,#model_parameters["train_correlation"],
             train = True,
             validation = 1/10,
             split_gen_seed = split_seed,
@@ -157,102 +159,43 @@ else :
     model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
 
     loss_fn = nn.CrossEntropyLoss()
+    concepts_engines, concept_parameters = cu.train_concept_engines(
+        dataloader=validation_dataloader,
+        model=model,
+        layer_depth=layer_depth,
+        number_of_concept=number_of_concept,
+        concept_decomposer=Craft,
+        patch_size=patch_size,
+        concept_dataset_size=concept_dataset_size,
+        batch_size=batch_size,
+        device=device,
+        get_masks=True if dataset=="Waterbirds" else False
+    )
+    print("-Concept decomposition trained successfully")
+    gr = cu.Gradient_retriever(model.backbone.fc if hasattr(model, "backbone") else list(model.children())[layer_depth-1])
 
-    if not args.multi_concept:
-        if model_name == "MNIST":
-            g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
-            h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
-        else:
-            g = nn.Sequential(*(list(model.backbone.children())[:-1] + [nn.Flatten(start_dim=1)])) # Layers pre concept decomposition
-            h = nn.Sequential(model.backbone.fc) # Layers post concept decompositon
+    results = {}
+    for backprop_step in backprop_steps:
+        print(f"-Gathering concepts with backprop step : {backprop_step}", end="\r")
+        results[backprop_step] = cu.gather_all_concept_results(validation_dataloader, model, loss_fn, concepts_engines, gr, backprop_mult=backprop_step, device=device, multi_concept=args.multi_concept)
+        print(f"-Concepts with backprop step {backprop_step} gathered successfully")
 
-        craft = Craft(
-            input_to_latent=g,
-            latent_to_logit = h,
-            number_of_concepts = number_of_concept,
-            patch_size = patch_size,
-            batch_size = batch_size,
-            device = device
-        )
+        # res = {}
+        # for classe in range(10):
+        #     biases = cu.get_bias_concept(results=results, studied_class=classe, number_of_concepts=number_of_concept)
+        #     study_list = list(biases.items())
+        #     study_list.sort(key=lambda x : x[1])
+        #     for c_id, val in study_list[::-1][:]:
+        #         if c_id in res:
+        #             res[c_id] = max(res[c_id], val)
+        #         else :
+        #             res[c_id] = val
+        # res = [(key, val) for key, val in res.items()]
+        # res.sort(key= lambda x: -x[1])
 
-        print(f"-Training the concept decomposition", end="\r")
-        concept_dataset = torch.Tensor([])
-        for batch in validation_dataloader:
-            X = batch[0]
-            print(f"Building concept dataset {len(concept_dataset)}/{concept_dataset_size}", end="\r")
-            if len(concept_dataset) >= concept_dataset_size:
-                break
-            concept_dataset = torch.cat((concept_dataset, X))
-        crops, crops_u, w = craft.fit(concept_dataset)
-        print("-Concept decomposition trained successfully")
-        crops = np.moveaxis(torch_to_numpy(crops), 1, -1)
-        gr = cu.Gradient_retriever(list(model.children())[layer_depth-1])
-
-        results = {}
-        for backprop_step in backprop_steps:
-            print(f"-Gathering concepts with backprop step : {backprop_step}", end="\r")
-            results[backprop_step] = cu.gather_all_concept_results(validation_dataloader, model, loss_fn, {"all":craft}, gr, backprop_mult=backprop_step, device=device)
-            print(f"-Concepts with backprop step {backprop_step} gathered successfully")
-
-            # res = {}
-            # for classe in range(10):
-            #     biases = cu.get_bias_concept(results=results, studied_class=classe, number_of_concepts=number_of_concept)
-            #     study_list = list(biases.items())
-            #     study_list.sort(key=lambda x : x[1])
-            #     for c_id, val in study_list[::-1][:]:
-            #         if c_id in res:
-            #             res[c_id] = max(res[c_id], val)
-            #         else :
-            #             res[c_id] = val
-            # res = [(key, val) for key, val in res.items()]
-            # res.sort(key= lambda x: -x[1])
-
-        # parameters["concept_bias"] = res
-        parameters["concept_results"] = results
-        parameters["concept_parameters"] = {
-            "W" : w,
-            "crops" : crops,
-            "crops_u" : crops_u,
-            "reducer" : craft.reducer,
-        }
-    
-    else:
-        concepts_engines, concept_parameters = cu.train_concept_engines(
-            dataloader=validation_dataloader,
-            model=model,
-            layer_depth=layer_depth,
-            number_of_concept=number_of_concept,
-            concept_decomposer=Craft,
-            patch_size=patch_size,
-            concept_dataset_size=concept_dataset_size,
-            batch_size=batch_size,
-            device=device,
-        )
-        print("-Concept decomposition trained successfully")
-        gr = cu.Gradient_retriever(model.backbone.fc if hasattr(model, "backbone") else list(model.children())[layer_depth-1])
-
-        results = {}
-        for backprop_step in backprop_steps:
-            print(f"-Gathering concepts with backprop step : {backprop_step}", end="\r")
-            results[backprop_step] = cu.gather_all_concept_results(validation_dataloader, model, loss_fn, concepts_engines, gr, backprop_mult=backprop_step, device=device, multi_concept=args.multi_concept)
-            print(f"-Concepts with backprop step {backprop_step} gathered successfully")
-
-            # res = {}
-            # for classe in range(10):
-            #     biases = cu.get_bias_concept(results=results, studied_class=classe, number_of_concepts=number_of_concept)
-            #     study_list = list(biases.items())
-            #     study_list.sort(key=lambda x : x[1])
-            #     for c_id, val in study_list[::-1][:]:
-            #         if c_id in res:
-            #             res[c_id] = max(res[c_id], val)
-            #         else :
-            #             res[c_id] = val
-            # res = [(key, val) for key, val in res.items()]
-            # res.sort(key= lambda x: -x[1])
-
-        # parameters["concept_bias"] = res
-        parameters["concept_results"] = results
-        parameters["concept_parameters"] = concept_parameters
+    # parameters["concept_bias"] = res
+    parameters["concept_results"] = results
+    parameters["concept_parameters"] = concept_parameters
 
     with open(result_path, "wb") as f:
         pkl.dump(parameters, f)
