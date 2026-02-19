@@ -9,8 +9,6 @@ import random
 import torch
 from src.colour_mnist import get_bias_difference_mnist_dataloader
 from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets
 from torchvision.transforms import ToTensor
 from craft.craft_torch import Craft, torch_to_numpy
 import src.model_utils as mu
@@ -53,7 +51,7 @@ concept_id = args.concept_id
 # number_of_concept = args.number_of_concept
 # patch_size = args.patch_size
 # concept_dataset_size = args.concept_dataset_size
-bias_labels = range(10) # TODO Kieran remove this hardcoded value to replace with the size of the output
+bias_labels = range(10)
 
 data_path = args.data_path
 if data_path == "":
@@ -70,6 +68,7 @@ model_result_path = result_path + f"model_{model_id}.pkl"
 if os.path.exists(model_result_path):
     with open(model_result_path, "rb") as f:
         model_parameters = pkl.load(f)
+    model_type = model_parameters["model_type"]
     batch_size = model_parameters["batch_size"]
     train_correlation = model_parameters["train_correlation"]
     test_correlation = model_parameters["test_correlation"]
@@ -99,23 +98,14 @@ if os.path.exists(bias_result_path):
     print(f"\n\n XXXXXXXX Bias analysis experiment number {model_id}|{concept_id} skipped, already done XXXXXXXX")
 else :
     print(f"XXXXXXXX Starting bias analysis experiment {model_id}|{concept_id}")
-    # run = wandb.init(
-    #     entity="thomas-vitry",
-    #     project="CVDB",
-    #     config=parameters,
-    # )
-
-    # train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
-    # test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "CMNIST" else None).to(device) # TODO Kieran modify so that the network is a parameter
+    model = mu.get_model(model_type=model_type)
+    model=model.to(device)
     assert(os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"))
     model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
-
-    # loss_fn = nn.CrossEntropyLoss()
 
     g = nn.Sequential(*(list(model.children())[:layer_depth-1])) # Layers pre concept decomposition
     h = nn.Sequential(*(list(model.children())[layer_depth-1:])) # Layers post concept decompositon
@@ -146,7 +136,7 @@ else :
             concept_engines[label].reducer = concept_parameters["concept_parameters"][label]["reducer"]
             concept_engines[label].W = np.array(concept_parameters["concept_parameters"][label]["W"], dtype=np.float32)
 
-    bias_dataloaders = { # TODO Kieran, modify so that the dataloader is a variable and can be waterbirds
+    bias_dataloaders = {
         bias_label: get_bias_difference_mnist_dataloader(root=data_path, batch_size=batch_size, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed, bias_colour=bias_label)[1]
         for bias_label in bias_labels}
 

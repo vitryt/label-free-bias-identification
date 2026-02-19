@@ -49,8 +49,7 @@ class BiasedMNIST(MNIST):
         We suggest to researchers considering this benchmark for future researches.
     """
 
-    COLOUR_MAP = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225],
-                  [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]]
+    COLOUR_MAP = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]] # [[255, 0, 128], [128, 0, 255], [128, 128, 128], [255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0]]
 
     def __init__(self, root, train=True, transform=None, target_transform=None,
                  download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42):
@@ -331,3 +330,19 @@ def get_bias_difference_mnist_dataloader(root, batch_size, train=True, bias_colo
                                  pin_memory=True)
         return train_dataloader, val_dataloader
 
+from torch import nn
+
+class CMNISTNeuralNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.flatten = nn.Flatten()
+        self.l1 = nn.Sequential(nn.Linear(28*28*3, 512), nn.ReLU())
+        self.l2 = nn.Sequential(nn.Linear(512, 512), nn.ReLU())
+        self.l3 = nn.Sequential(nn.Linear(512, 10))
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.l1(x)
+        x = self.l2(x)
+        logits = self.l3(x)
+        return logits

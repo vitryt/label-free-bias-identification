@@ -12,7 +12,6 @@ def train(dataloader, model, loss_fn, optimizer, device="cpu"):
     size = len(dataloader.dataset)
     model.train()
 
-    # for batch, (X, y, _) in enumerate(dataloader): # TODO Kieran change so that the dataloader can have only two values
     for batch, batch_data in enumerate(dataloader):
         if isinstance(batch_data, (list, tuple)):
             X = batch_data[0]
@@ -61,7 +60,6 @@ def test(dataloader, model, loss_fn, device="cpu"):
                 X = batch_data[0]
                 y = batch_data[1]
                 if len(batch_data) >= 3:
-                    print("Bias found")
                     y_pred = batch_data[2]
                 else:
                     y_pred = y
@@ -70,7 +68,6 @@ def test(dataloader, model, loss_fn, device="cpu"):
 
             X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
             pred = model(X)
-
             if len(appearance_matrix)==0:
                 size_y = len(pred[0])
                 appearance_matrix = np.array([[0 for i in range(size_y)] for j in range(size_y)])
@@ -118,17 +115,30 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
     return adjacency_matrix
 
 
-class CMNISTNeuralNetwork(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.flatten = nn.Flatten()
-        self.l1 = nn.Sequential(nn.Linear(28*28*3, 512), nn.ReLU())
-        self.l2 = nn.Sequential(nn.Linear(512, 512), nn.ReLU())
-        self.l3 = nn.Sequential(nn.Linear(512, 10))
+# Model imports --> we could move to conditional statements
+from src.colour_mnist import CMNISTNeuralNetwork
+from src.waterbird import WaterbirdsResNet18, WaterbirdsResNet50
+from src.celeba import CelebAResNet50
 
-    def forward(self, x):
-        x = self.flatten(x)
-        x = self.l1(x)
-        x = self.l2(x)
-        logits = self.l3(x)
-        return logits
+def get_model(model_type):
+    if model_type == "MLP":
+        return CMNISTNeuralNetwork()
+    elif model_type == "resnet18":
+        return WaterbirdsResNet18(num_classes = 2)
+    elif model_type == "resnet50":
+        return WaterbirdsResNet50(num_classes = 2)
+    elif model_type == "resnetceleb":
+        return CelebAResNet50()
+    else:
+        raise ValueError("Not a defined model being specified in model_training.py!")
+
+
+def get_optimizer(optimizer_type, model):
+    if optimizer_type == "sgd":
+        return torch.optim.SGD(model.parameters(), lr = 1e-3)
+    elif optimizer_type == "adam":
+        return torch.optim.Adam(model.parameters(), lr = 1e-3)
+    elif optimizer_type == "adamw":
+        return torch.optim.AdamW(model.parameters(), lr = 1e-3)
+    else:
+        raise ValueError("Not a defined optimiser being specified in model_training.py!")

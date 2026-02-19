@@ -12,20 +12,12 @@ from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 import src.model_utils as mu
-
-# Dataset imports --> we could move to conditional statements
-from src.colour_mnist import get_biased_mnist_dataloader # Coloured MNIST
-from src.waterbird import WaterBirdsDataset # Waterbirds
-
-# Model imports --> we could move to conditional statements
-from src.resnet18_utils import WaterbirdsResNet18
-from src.resnet50_utils import WaterbirdsResNet50
+import src.dataset_utils as du
 
 
 
 sys.path.append(os.getcwd())
 
-# TODO Kieran add arguments for the dataset, model and optimizer
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_id", type=int, default=0)
 parser.add_argument("--model_name", type=str, default="MNIST")
@@ -40,8 +32,8 @@ parser.add_argument("--result_path", type=str, default="")
 parser.add_argument("--data_path", type=str, default="")
 
 # Updated arguments for introduction of Waterbirds dataset, ResNet models and modularity
-parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds"]) # Add CelebA down the line
-parser.add_argument("--model_type", type=str, default="MLP", choices=["MLP", "resnet18", "resnet50"])
+parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds", "CelebA"])
+parser.add_argument("--model_type", type=str, default="MLP", choices=["MLP", "resnet18", "resnet50", "resnetceleb"])
 parser.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam", "adamw"])
 
 args = parser.parse_args()
@@ -78,7 +70,6 @@ result_path += f"model_{model_id}.pkl"
 if os.path.exists(result_path):
     with open(result_path, "rb") as f:
         parameters = pkl.load(f)
-    # TODO add the new parameters here
     batch_size = parameters["batch_size"]
     train_correlation = parameters["train_correlation"]
     test_correlation = parameters["test_correlation"]
@@ -87,9 +78,9 @@ if os.path.exists(result_path):
     shuffle_seed = parameters["shuffle_seed"]
     dataset = parameters["dataset"]
     model_type = parameters["model_type"]
-    optimizer_type = parameters["optimizer"]
+    optimizer_type = parameters["optimizer_type"]
 else:
-    parameters = { # TODO Kieran add the new parameters here
+    parameters = {
         "model_id":model_id,
         "model_name":model_name,
         "batch_size":batch_size,
@@ -108,69 +99,31 @@ if os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"):
 
 else :
     print(f"XXXXXXXX Starting training of model {model_id} with parameters :", parameters)
-    # run = wandb.init(
-    #     entity="thomas-vitry",
-    #     project="CVDB",
-    #     config=parameters,
-    # )
-
-    # TODO Change so that the datasets are a parameter
-    # train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
-    # test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
     test_func = mu.test
-    if args.dataset == "MNIST":
-        train_dataloader, validation_dataloader = get_biased_mnist_dataloader(
-            root = data_path, 
-            batch_size = batch_size, 
-            data_label_correlation = train_correlation,
-            train = True, 
-            validation = 1/10, 
-            split_gen_seed = split_seed, 
-            shuffle_seed = shuffle_seed
+    train_dataloader, test_dataloader = du.get_dataloaders(
+        dataset_name=dataset,
+        data_path=data_path,
+        split=["train", "test"],
+        train_correlation=train_correlation,
+        test_correlation=test_correlation,
+        batch_size=batch_size,
+        seeds=(split_seed, shuffle_seed)
         )
-        test_dataloader = get_biased_mnist_dataloader(
-            root = data_path, 
-            batch_size = batch_size, 
-            data_label_correlation = test_correlation,
-            train = False, 
-            shuffle_seed = shuffle_seed
-        )
-    elif args.dataset == "Waterbirds":
-        transform = None  # Using default
-        train_dataloader = DataLoader(WaterBirdsDataset(data_path, "train", transform), batch_size = batch_size, shuffle = True)
-        validation_dataloader = DataLoader(WaterBirdsDataset(data_path, "val", transform), batch_size = batch_size)
-        test_dataloader = DataLoader(WaterBirdsDataset(data_path, "test", transform), batch_size = batch_size)
-
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    if args.model_type == "MLP":
-        model = mu.CMNISTNeuralNetwork().to(device)
-    elif args.model_type == "resnet18":
-        model = WaterbirdsResNet18(num_classes = 2).to(device)
-    elif args.model_type == "resnet50":
-        model = WaterbirdsResNet50(num_classes = 2).to(device)
-    else:
-        raise ValueError("Not a defined model being specified in model_training.py!")
+    model = mu.get_model(model_type=args.model_type)
     model=model.to(device)
     loss_fn = nn.CrossEntropyLoss()
-    # optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3) # TODO Change this so that the optimizer is a parameter
-    if args.optimizer == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr = 1e-3)
-    elif args.optimizer == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
-    elif args.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(model.parameters(), lr = 1e-3)
-    else:
-        raise ValueError("Not a defined optimiser being specified in model_training.py!")
+    optimizer = mu.get_optimizer(optimizer_type=args.optimizer, model=model)
 
     accuracy_matrixes = []
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
         mu.train(train_dataloader, model, loss_fn, optimizer, device=device)
         print("                                            ")
-        correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device) # TODO change to use a different test function in case you modified that
+        correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device)
     torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
     parameters["correctness_matrix"] = correctness_matrix
     parameters["appearance_matrix"] = appearance_matrix
@@ -178,6 +131,5 @@ else :
     with open(result_path, "wb") as f:
         pkl.dump(parameters, f)
     
-    # run.finish()
     print(f"OOOOOOOOO Training of model number {model_id} runned with sucess OOOOOOOOO")
 

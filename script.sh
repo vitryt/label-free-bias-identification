@@ -6,13 +6,13 @@ model_type="MLP"
 model_name="CMNIST"
 optimizer="adam"
 gpu_id="0"
-result_path="/data/4vitry/"
-data_path="/data/4vitry/"
+result_path="/data/"
+data_path="/data/"
 
-for model_id in {10..14}
+for model_id in {0..0}
 do
     echo "Starting experiment with model : $model_id"
-    python model_training.py --model_id $model_id --model_name $model_name --batch_size 256 --epochs 200 --split_seed ${random_seeds[$model_id]} --shuffle_seed ${random_seeds[$model_id]} --gpu_id $gpu_id --result_path $result_path --data_path $data_path --dataset $dataset --model_type $model_type --optimizer $optimizer
+    python model_training.py --model_id $model_id --model_name $model_name --batch_size 256 --epochs 20 --split_seed ${random_seeds[$model_id]} --shuffle_seed ${random_seeds[$model_id]} --gpu_id $gpu_id --result_path $result_path --data_path $data_path --dataset $dataset --model_type $model_type --optimizer $optimizer
     python model_testing.py --model_id $model_id --model_name $model_name --gpu_id $gpu_id --result_path $result_path --data_path $data_path
     for concept_id in {0..2}
     do
@@ -24,6 +24,7 @@ do
             python bias_analysis.py --model_id $model_id --model_name $model_name --concept_id $concept_id"_"$patch_size_id --gpu_id $gpu_id --result_path $result_path --data_path $data_path --multi_concept 1
             # echo "Correlating biases : $model_id | $concept_id, $patch_size_id"
             # python bias_correlation.py --model_id $model_id --model_name $model_name --concept_id $concept_id"_"$patch_size_id --gpu_id $gpu_id --result_path $result_path --data_path $data_path --multi_concept 1
+            python debiasing.py --model_id $model_id --model_name $model_name --concept_id $concept_id"_"$patch_size_id --gpu_id $gpu_id --result_path $result_path --data_path $data_path --bias_threshold 30 --backprop_step 700
         done
     done
 done

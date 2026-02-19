@@ -28,8 +28,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_id", type=int, default=0)
 parser.add_argument("--model_name", type=str, default="MNIST")
 
-# parser.add_argument("--backprop_step", type=int, default=1000)
-# parser.add_argument("--concept_threshold", type=float, default=0.3)
 parser.add_argument("--gpu_id", type=str, default="0")
 parser.add_argument("--result_path", type=str, default="")
 parser.add_argument("--data_path", type=str, default="")
@@ -40,7 +38,6 @@ args = parser.parse_args()
 model_id = args.model_id
 model_name = args.model_name
 
-# backprop_step = args.backprop_step
 
 data_path = args.data_path
 if data_path == "":
@@ -62,6 +59,8 @@ if os.path.exists(model_result_path):
     test_correlation = model_parameters["test_correlation"]
     split_seed = model_parameters["split_seed"]
     shuffle_seed = model_parameters["shuffle_seed"]
+    model_type = model_parameters["model_type"]
+    optimizer_type = model_parameters["optimizer_type"]
 else:
     print("Error ! You need to train the model before being able to test it !")
     raise FileExistsError(model_result_path)
@@ -72,11 +71,6 @@ if os.path.exists(result_path):
     print(f"\n\n XXXXXXXX Testing model {model_id} skipped, already done XXXXXXXX")
 else :
     print(f"XXXXXXXX Testing model {model_id} with parameters :")
-    # run = wandb.init(
-    #     entity="thomas-vitry",
-    #     project="CVDB",
-    #     config=parameters,
-    # )
 
     train_dataloader, validation_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=train_correlation, train=True, validation=1/10, split_gen_seed=split_seed, shuffle_seed=shuffle_seed)
     test_dataloader = get_biased_mnist_dataloader(root=data_path, batch_size=batch_size, data_label_correlation=test_correlation, train=False, shuffle_seed=shuffle_seed)
@@ -84,7 +78,8 @@ else :
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = (mu.CMNISTNeuralNetwork() if model_parameters["model_name"] == "CMNIST" else None).to(device)
+    model = mu.get_model(model_type=model_type)
+    model=model.to(device)
     assert(os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"))
     model.load_state_dict(torch.load(args.result_path + f"models/{model_name}/model_{model_id}"))
 
@@ -95,6 +90,5 @@ else :
     with open(result_path, "wb") as f:
         pkl.dump(adjacency_matrix, f)
     
-    # run.finish()
     print(f"OOOOOOOOO Testing model {model_id} runned with sucess OOOOOOOOO")
 
