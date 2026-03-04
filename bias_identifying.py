@@ -126,7 +126,7 @@ else :
         concept_dataset_size=concept_dataset_size,
         batch_size=batch_size,
         device=device,
-        get_masks=True if dataset=="Waterbirds" else False
+        get_masks=True if dataset in ("Waterbirds", "UrbanCars") else False
     )
     print("-Concept decomposition trained successfully")
     gr = cu.Gradient_retriever(model.backbone.fc if hasattr(model, "backbone") else list(model.children())[layer_depth-1])

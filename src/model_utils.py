@@ -119,6 +119,7 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
 from src.colour_mnist import CMNISTNeuralNetwork
 from src.waterbird import WaterbirdsResNet18, WaterbirdsResNet50
 from src.celeba import CelebAResNet50
+from src.urbancars import UrbanCarsResNet50, UrbanCarsResNet18
 
 def get_model(model_type):
     if model_type == "MLP":
@@ -129,6 +130,10 @@ def get_model(model_type):
         return WaterbirdsResNet50(num_classes = 2)
     elif model_type == "resnetceleb":
         return CelebAResNet50()
+    elif model_type == "resneturban50":
+        return UrbanCarsResNet50()
+    elif model_type == "resneturban18":
+        return UrbanCarsResNet18()
     else:
         raise ValueError("Not a defined model being specified in model_training.py!")
 

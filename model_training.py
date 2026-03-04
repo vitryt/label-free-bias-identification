@@ -32,8 +32,8 @@ parser.add_argument("--result_path", type=str, default="")
 parser.add_argument("--data_path", type=str, default="")
 
 # Updated arguments for introduction of Waterbirds dataset, ResNet models and modularity
-parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds", "CelebA"])
-parser.add_argument("--model_type", type=str, default="MLP", choices=["MLP", "resnet18", "resnet50", "resnetceleb"])
+parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds", "CelebA", "UrbanCars"])
+parser.add_argument("--model_type", type=str, default="MLP", choices=["MLP", "resnet18", "resnet50", "resnetceleb", "resneturban50", "resneturban18"])
 parser.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam", "adamw"])
 
 args = parser.parse_args()
