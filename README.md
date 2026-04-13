@@ -22,8 +22,8 @@ This repository implements a pipeline that:
 
 Datasets were installed from the following links :
 - CMNIST: automatic
-- [link](https://github.com/kohpangwei/group_DRO)
-- [link](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)
+- [Waterbirds](https://github.com/kohpangwei/group_DRO)
+- [CelebA](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)
 
 ## Supported Models
 
