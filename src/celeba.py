@@ -16,6 +16,10 @@ class CelebAResNet50(nn.Module):
         self.multi_label = multi_label
         self.out_dim = out_dim
 
+    def get_grad_cam_target_layer(self):
+        """Last conv block — standard GradCAM target for ResNets."""
+        return self.backbone.layer4[-1]
+
     def forward(self, x):
         return self.backbone(x)
     

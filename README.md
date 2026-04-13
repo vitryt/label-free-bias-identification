@@ -18,18 +18,22 @@ This repository implements a pipeline that:
 | Coloured MNIST | `MNIST` | Digit classification with spurious colour-digit correlations |
 | Waterbirds | `Waterbirds` | Bird classification with spurious background correlations |
 | CelebA | `CelebA` | Celebrity attribute classification |
-| UrbanCars | `UrbanCars` | Urban car classification |
+<!-- | UrbanCars | `UrbanCars` | Urban car classification | -->
+
+Datasets were installed from the following links :
+- CMNIST: automatic
+- [link](https://github.com/kohpangwei/group_DRO)
+- [link](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)
 
 ## Supported Models
 
 | Key | Architecture |
 |-----|-------------|
 | `MLP` | Multi-layer perceptron (for CMNIST) |
+| `cnn` | Small CNN (for CMNIST) |
 | `resnet18` | ResNet-18 (for Waterbirds) |
 | `resnet50` | ResNet-50 (for Waterbirds) |
 | `resnetceleb` | ResNet-50 (for CelebA) |
-| `resneturban18` | ResNet-18 (for UrbanCars) |
-| `resneturban50` | ResNet-50 (for UrbanCars) |
 
 ## Repository Structure
 
@@ -39,22 +43,20 @@ This repository implements a pipeline that:
 │   ├── colour_mnist.py      # Coloured MNIST dataset & model definition
 │   ├── waterbird.py         # Waterbirds dataset & ResNet model definitions
 │   ├── celeba.py            # CelebA dataset & model definition
-│   ├── urbancars.py         # UrbanCars dataset & model definitions
 │   ├── dataset_utils.py     # Unified dataloader factory
 │   ├── model_utils.py       # Training/evaluation loops, model & optimizer factory
 │   ├── concept_utils.py     # CRAFT-based concept decomposition & bias analysis utilities
 │   └── nmf_merge.py         # NMF component-level fusion across decompositions
+├── bash_scripts/            # Folder with various pipeline scripts to train and evaluate 10 models on various datasets
+├── figures/                 # Folder with the figures from the paper. All .png can be recreated with `results_recovery.ipynb`
+├── environment.yml          # Environment file for Conda
+├── requirements.txt         # Environment file for Pip
 ├── model_training.py        # Step 1 – Train a classification model
-├── model_testing.py         # Step 2 – Evaluate model on biased test sets
-├── bias_identifying.py      # Step 3 – Decompose activations into concepts
-├── bias_analysis.py         # Step 4 – Score concepts for bias association
-├── debiasing.py             # Step 5 – Suppress bias concepts at inference
-├── data_recovery.ipynb      # Notebook for dataset preparation / inspection
-├── script.sh                # Full pipeline script for CMNIST / MLP
-├── script18.sh              # Full pipeline script for Waterbirds / ResNet-18
-├── script50.sh              # Full pipeline script for Waterbirds / ResNet-50
-├── environment.yml          # Conda environment specification
-└── requirements.txt         # pip requirements
+├── bias_identifying.py      # Step 2 – Decompose activations into concepts
+├── bias_analysis.py         # Step 2.5 – Score concepts for bias association (for CMNIST only)
+├── debiasing.py             # Step 3 – Suppress bias concepts at inference
+├── results_recovery.ipynb   # Notebook for dataset preparation / inspection
+└── novic.ipynb              # Notebook to us with NOVIC to recover the generated labels of the concepts
 ```
 
 ## Installation
@@ -63,7 +65,8 @@ This repository implements a pipeline that:
 
 ```bash
 conda env create -f environment.yml
-conda activate debiafting
+conda activate label-free-bias
+pip install Craft-xai
 ```
 
 ### pip
@@ -83,7 +86,7 @@ Each step saves its results as a `.pkl` file and skips re-execution if the outpu
 ```bash
 python model_training.py \
     --model_id 0 \
-    --model_name CMNIST \
+    --model_name CMNISTb \
     --dataset MNIST \
     --model_type MLP \
     --optimizer adam \
@@ -97,23 +100,13 @@ python model_training.py \
     --data_path /path/to/data/
 ```
 
-### 2. Test the model
-
-```bash
-python model_testing.py \
-    --model_id 0 \
-    --model_name CMNIST \
-    --result_path /path/to/results/ \
-    --data_path /path/to/data/
-```
-
-### 3. Identify concepts (bias candidates)
+### 2. Identify concepts (bias candidates)
 
 ```bash
 python bias_identifying.py \
     --model_id 0 \
-    --model_name CMNIST \
-    --concept_id 0_0 \
+    --model_name CMNISTb \
+    --concept_id b_0_0 \
     --layer_depth 4 \
     --number_of_concept 16 \
     --patch_size 8 \
@@ -123,26 +116,26 @@ python bias_identifying.py \
     --data_path /path/to/data/
 ```
 
-### 4. Analyse biases
+### 2.5. Analyse biases
 
 ```bash
 python bias_analysis.py \
     --model_id 0 \
-    --model_name CMNIST \
-    --concept_id 0_0 \
+    --model_name CMNISTb \
+    --concept_id b_0_0 \
     --result_path /path/to/results/ \
     --data_path /path/to/data/
 ```
 
-### 5. Debias at inference
+### 3. Debias at inference
 
 ```bash
 python debiasing.py \
     --model_id 0 \
     --model_name CMNIST \
-    --concept_id 0_0 \
-    --bias_threshold 30 \
-    --backprop_step 700 \
+    --concept_id b_0_0 \
+    --bias_threshold 55 \
+    --backprop_step 20000 \
     --result_path /path/to/results/ \
     --data_path /path/to/data/
 ```
@@ -151,13 +144,14 @@ python debiasing.py \
 
 ```bash
 # CMNIST / MLP
-bash script.sh
+bash bash_scripts/scriptb.sh
+bash bash_scripts/scriptbb.sh
 
 # Waterbirds / ResNet-18
-bash script18.sh
+bash bash_scripts/scriptwater18.sh
 
-# Waterbirds / ResNet-50
-bash script50.sh
+# CelebA / ResNet-50
+bash bash_scripts/scriptceleb.sh
 ```
 
 ## Output files
@@ -168,7 +162,9 @@ All outputs are written under `<result_path>/models/<model_name>/`:
 |------|---------|
 | `model_<id>.pkl` | Training hyperparameters and evaluation matrices |
 | `model_<id>` | Saved model weights (`torch.save`) |
-| `test_model_<id>.pkl` | Adjacency matrix from biased test evaluation |
 | `concepts_<model_id>_<concept_id>.pkl` | Concept decomposition and importance scores |
-| `bias_<model_id>_<concept_id>.pkl` | Per-concept bias scores per class |
 | `debias_<model_id>_<concept_id>.pkl` | Merged concept dictionary and debiased evaluation results |
+
+## NOVIC
+
+In order to run the novic.ipynb code, we advise to get and follow the instructions from the [NOVIC repository](https://github.com/pallgeuer/novic) in a new environment. The pip version was found more stable.

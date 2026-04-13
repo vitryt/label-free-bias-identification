@@ -194,6 +194,10 @@ class WaterbirdsResNet50(nn.Module):
         in_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Linear(in_features, num_classes)
 
+    def get_grad_cam_target_layer(self):
+        """Last conv block — standard GradCAM target for ResNets."""
+        return self.backbone.layer4[-1]
+
     def forward(self, x):
         return self.backbone(x)
 
@@ -210,6 +214,10 @@ class WaterbirdsResNet18(nn.Module):
         self.backbone = resnet18(weights=weights)
         in_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Linear(in_features, num_classes)
+
+    def get_grad_cam_target_layer(self):
+        """Last conv block — standard GradCAM target for ResNets."""
+        return self.backbone.layer4[-1]
 
     def forward(self, x):
         return self.backbone(x)

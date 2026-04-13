@@ -3,7 +3,6 @@ import sys
 import pickle as pkl
 import os
 import random
-import wandb
 import numpy as np
 
 import torch
@@ -32,9 +31,12 @@ parser.add_argument("--result_path", type=str, default="")
 parser.add_argument("--data_path", type=str, default="")
 
 # Updated arguments for introduction of Waterbirds dataset, ResNet models and modularity
-parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds", "CelebA", "UrbanCars"])
-parser.add_argument("--model_type", type=str, default="MLP", choices=["MLP", "resnet18", "resnet50", "resnetceleb", "resneturban50", "resneturban18"])
+parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "Waterbirds", "CelebA"])
+parser.add_argument("--model_type", type=str, default="MLP", choices=["cnn", "MLP", "resnet18", "resnet50", "resnetceleb"])
 parser.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam", "adamw"])
+parser.add_argument("--starting_lr", type=float, default=0.01)
+parser.add_argument("--lr_decrease_factor", type=float, default=0.5)
+parser.add_argument("--lr_decrease_frequency", type=int, default=25)
 
 args = parser.parse_args()
 
@@ -50,11 +52,14 @@ shuffle_seed = args.shuffle_seed
 dataset = args.dataset
 model_type = args.model_type
 optimizer_type = args.optimizer
+starting_lr = args.starting_lr
+lr_decrease_factor = args.lr_decrease_factor
+lr_decrease_frequency = args.lr_decrease_frequency
 
 data_path = args.data_path
 if data_path == "":
     data_path = os.getcwd()
-data_path += "/data/" + dataset
+data_path += "/" + dataset
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -79,6 +84,9 @@ if os.path.exists(result_path):
     dataset = parameters["dataset"]
     model_type = parameters["model_type"]
     optimizer_type = parameters["optimizer_type"]
+    starting_lr = parameters.get("starting_lr", starting_lr)
+    lr_decrease_factor = parameters.get("lr_decrease_factor", lr_decrease_factor)
+    lr_decrease_frequency = parameters.get("lr_decrease_frequency", lr_decrease_frequency)
 else:
     parameters = {
         "model_id":model_id,
@@ -92,10 +100,13 @@ else:
         "dataset":dataset,
         "model_type": model_type,
         "optimizer_type":optimizer_type,
+        "starting_lr":starting_lr,
+        "lr_decrease_factor":lr_decrease_factor,
+        "lr_decrease_frequency":lr_decrease_frequency,
     }
 
 if os.path.exists(args.result_path + f"models/{model_name}/model_{model_id}"):
-    print(f"\n\n XXXXXXXX Training of model {model_id} skipped, already done XXXXXXXX")
+    print(f"\n\n XXXXXXXX Training of model {model_id} skipped,  already done XXXXXXXX")
 
 else :
     print(f"XXXXXXXX Starting training of model {model_id} with parameters :", parameters)
@@ -113,10 +124,15 @@ else :
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
 
-    model = mu.get_model(model_type=args.model_type)
+    model = mu.get_model(model_type=model_type)
     model=model.to(device)
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = mu.get_optimizer(optimizer_type=args.optimizer, model=model)
+    optimizer = mu.get_optimizer(optimizer_type=optimizer_type, model=model, lr=starting_lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=lr_decrease_frequency,
+        gamma=lr_decrease_factor,
+    )
 
     accuracy_matrixes = []
     for t in range(epochs):
@@ -124,6 +140,8 @@ else :
         mu.train(train_dataloader, model, loss_fn, optimizer, device=device)
         print("                                            ")
         correctness_matrix, appearance_matrix = mu.test(test_dataloader, model, loss_fn, device=device)
+        scheduler.step()
+        print(f"Learning rate after epoch {t+1} : {optimizer.param_groups[0]['lr']}")
     torch.save(model.state_dict(), args.result_path + f"models/{model_name}/model_{model_id}")
     parameters["correctness_matrix"] = correctness_matrix
     parameters["appearance_matrix"] = appearance_matrix

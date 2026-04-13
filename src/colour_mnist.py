@@ -49,10 +49,14 @@ class BiasedMNIST(MNIST):
         We suggest to researchers considering this benchmark for future researches.
     """
 
-    COLOUR_MAP = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]] # [[255, 0, 128], [128, 0, 255], [128, 128, 128], [255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0]]
+    COLOUR_MAP = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]] # [[255, 0, 128], [128, 0, 255], [128, 128, 128], [255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0]] # 
 
     def __init__(self, root, train=True, transform=None, target_transform=None,
-                 download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42):
+                 download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42, ob=0):
+        if ob:
+            self.COLOUR_MAP = [[255, 0, 128], [128, 0, 255], [128, 128, 128], [255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0]]
+            print("_"*10)
+            print("Switch to alternative colour map for bias !")
         super().__init__(root, train=train, transform=transform,
                          target_transform=target_transform,
                          download=download)
@@ -146,13 +150,14 @@ class BiasedMNIST(MNIST):
 
 class ColourBiasedMNIST(BiasedMNIST):
     def __init__(self, root, train=True, transform=None, target_transform=None,
-                 download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42):
+                 download=False, data_label_correlation=1.0, n_confusing_labels=9, shuffle_seed=42, ob=0):
         super(ColourBiasedMNIST, self).__init__(root, train=train, transform=transform,
                                                 target_transform=target_transform,
                                                 download=download,
                                                 data_label_correlation=data_label_correlation,
                                                 n_confusing_labels=n_confusing_labels,
-                                                shuffle_seed=shuffle_seed)
+                                                shuffle_seed=shuffle_seed,
+                                                ob=ob)
 
     def _binary_to_colour(self, data, colour):
         # fg_data = torch.zeros_like(data)
@@ -174,14 +179,14 @@ class ColourBiasedMNIST(BiasedMNIST):
 
 
 def get_biased_mnist_dataloader(root, batch_size, data_label_correlation,
-                                n_confusing_labels=9, train=True, num_workers=8, validation=0, split_gen_seed = 42, shuffle_seed = 42):
+                                n_confusing_labels=9, train=True, num_workers=8, validation=0, split_gen_seed = 42, shuffle_seed = 42, ob=0):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5, 0.5, 0.5),
                              std=(0.5, 0.5, 0.5))])
     dataset = ColourBiasedMNIST(root, train=train, transform=transform,
                                 download=True, data_label_correlation=data_label_correlation,
-                                n_confusing_labels=n_confusing_labels, shuffle_seed = shuffle_seed)
+                                n_confusing_labels=n_confusing_labels, shuffle_seed = shuffle_seed, ob=ob)
     if not train or not validation:
         dataloader = data.DataLoader(dataset=dataset,
                                  batch_size=batch_size,
@@ -215,7 +220,9 @@ class BiasDifferenceMNIST(MNIST):
                   [0, 255, 255], [255, 128, 0], [255, 0, 128], [128, 0, 255], [128, 128, 128]]
 
     def __init__(self, root, train=True, transform=None, target_transform=None,
-                 download=False, bias_colour=[255, 0, 0], shuffle_seed=42):
+                 download=False, bias_colour=[255, 0, 0], shuffle_seed=42, ob=0):
+        if ob:
+            self.COLOUR_MAP = [[255, 0, 128], [128, 0, 255], [128, 128, 128], [255, 0, 0], [0, 255, 0], [0, 0, 255], [225, 225, 0], [225, 0, 225], [0, 255, 255], [255, 128, 0]]
         super().__init__(root, train=train, transform=transform,
                          target_transform=target_transform,
                          download=download)
@@ -298,7 +305,7 @@ class BiasDifferenceMNIST(MNIST):
         return neutral_img, biased_img, target
 
 
-def get_bias_difference_mnist_dataloader(root, batch_size, train=True, bias_colour = [255, 0, 0], num_workers=8, validation=0, split_gen_seed = 42, shuffle_seed = 42):
+def get_bias_difference_mnist_dataloader(root, batch_size, train=True, bias_colour = [255, 0, 0], num_workers=8, validation=0, split_gen_seed = 42, shuffle_seed = 42, ob=0):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5, 0.5, 0.5),
@@ -306,7 +313,8 @@ def get_bias_difference_mnist_dataloader(root, batch_size, train=True, bias_colo
     dataset = BiasDifferenceMNIST(root, train=train, transform=transform,
                                 download=True,
                                 bias_colour=bias_colour,
-                                shuffle_seed = shuffle_seed)
+                                shuffle_seed = shuffle_seed,
+                                ob = ob)
     if not train or not validation:
         dataloader = data.DataLoader(dataset=dataset,
                                  batch_size=batch_size,
@@ -336,13 +344,88 @@ class CMNISTNeuralNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.flatten = nn.Flatten()
-        self.l1 = nn.Sequential(nn.Linear(28*28*3, 512), nn.ReLU())
-        self.l2 = nn.Sequential(nn.Linear(512, 512), nn.ReLU())
-        self.l3 = nn.Sequential(nn.Linear(512, 10))
+        self.l1 = nn.Sequential(nn.Linear(28*28*3, 100), nn.ReLU())
+        self.l2 = nn.Sequential(nn.Linear(100, 100), nn.ReLU())
+        self.l3 = nn.Sequential(nn.Linear(100, 10))
 
     def forward(self, x):
         x = self.flatten(x)
         x = self.l1(x)
         x = self.l2(x)
         logits = self.l3(x)
+        return logits
+
+
+class CMNISTSmallCNN(nn.Module):
+    """
+    Small CNN for 10-class ColourMNIST.
+
+    Architecture mirrors MaskTune's SmallCNN but is adapted for the
+    CVDB 10-class setup and integrated into the CVDB model registry.
+
+    The model has two top-level children visible to ``list(model.children())``:
+        [0] ``features``  – convolutional feature extractor (conv→bn→relu blocks + maxpool)
+        [1] ``classifier`` – single ``nn.Linear(512, num_classes)``
+
+    The classifier is deliberately kept as a **single linear layer** so
+    that the full model is weight-compatible with uLA, which builds its
+    own classifier as ``nn.Sequential(backbone, nn.Linear(features_dim,
+    num_classes))``.  Keeping the same structure means the ERM checkpoint
+    can be loaded into uLA without discarding the trained head.
+
+    Attribute names are intentionally *not* ``backbone`` / ``backbone.fc``
+    so that CVDB's ``bias_identifying.py`` takes the generic
+    ``list(model.children())[layer_depth-1]`` path when slicing the model
+    for concept decomposition (instead of the ResNet-specific
+    ``model.backbone.fc`` path).
+
+    ``get_grad_cam_target_layer()`` returns the last ReLU activation
+    inside ``features`` (before the final MaxPool + Flatten), which is the
+    standard target for XGradCAM-style saliency maps (used by MaskTune).
+
+    Input:  (B, 3, 28, 28) normalised ColourMNIST images.
+    Output: (B, num_classes) logits.
+    """
+
+    def __init__(self, num_classes: int = 10):
+        super().__init__()
+        self.num_classes = num_classes
+
+        # Convolutional feature extractor
+        # Conv blocks: 3→16→16 (maxpool) → 32→32 (maxpool) → flatten
+        # Spatial dimensions for 28×28 input:
+        #   28 → conv3x3 → 26 → conv3x3 → 24 → maxpool2 → 12
+        #   12 → conv3x3 → 10 → conv3x3 →  8 → maxpool2 →  4
+        # Flattened: 32 * 4 * 4 = 512
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=0),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=0),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=0),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=0),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Flatten(),
+        )
+
+        # Single linear classifier head (compatible with uLA's nn.Linear)
+        self.classifier = nn.Linear(512, self.num_classes)
+
+    def get_grad_cam_target_layer(self):
+        """Return the last ReLU before final MaxPool+Flatten, suitable as XGradCAM target."""
+        # features[-3] is the ReLU after the last Conv2d(32,32)+BatchNorm2d(32) block,
+        # just before the final MaxPool2d and Flatten.  This matches the layer
+        # chosen by MaskTune's original SmallCNN.
+        return self.features[-3]
+
+    def forward(self, x):
+        x = self.features(x)
+        logits = self.classifier(x)
         return logits

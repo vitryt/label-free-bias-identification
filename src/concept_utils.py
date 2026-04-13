@@ -2,6 +2,11 @@ import torch
 import numpy as np
 from torch import nn
 from craft.craft_torch import torch_to_numpy
+from torch.linalg import vector_norm as norm
+from scipy.stats import chi2_contingency
+from sklearn.metrics import matthews_corrcoef
+import pickle as pkl
+import src.model_utils as mu
 
 class Gradient_retriever():
     def __init__(self, layer):
@@ -13,6 +18,7 @@ class Gradient_retriever():
     
     def __del__(self):
         self.handle.remove()
+
 
 def compute_mask_patches(inputs, patch_size):
     strides = int(patch_size * 0.80)
@@ -91,7 +97,7 @@ def get_backprop(X, y, model, loss_fn, concept_engine, gradient_recoverer, back_
 
 
 
-def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, gradient_recoverer, backprop_mult=1, device="cpu", multi_concept=False):
+def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, gradient_recoverer, backprop_mult=1, device="cpu"):
     results = {}
     concept_engine = list(concept_engines.values())[0]
     output_size = 0
@@ -134,17 +140,6 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
         label = int(label)
         m = concept_engine.number_of_concepts
         studied_index = np.array(range(len(y_wrong)))[y_wrong==label]
-        # n = len(studied_index)
-        # k = n
-        # batch_activation = []
-        # batch_backprop = []
-        # for j in range(k):
-        #     print(f"Generating datapoint {j}/{k}   ", end="\r")
-        #     batch_indices = np.random.choice(studied_index, m)
-        #     batch_activation.append(activation_wrong[batch_indices].mean(axis=0))
-        #     batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
-        # batch_activation = torch.stack(batch_activation)
-        # batch_backprop = torch.stack(batch_backprop)
         batch_activation = activation_wrong[studied_index]
         batch_backprop = backprop_wrong[studied_index]
         
@@ -185,17 +180,6 @@ def gather_all_concept_results(dataloader, model, loss_fn, concept_engines, grad
         label = int(label)
         m = concept_engine.number_of_concepts
         studied_index = np.array(range(len(y_predi_wrong)))[y_predi_wrong==label]
-        # n = len(studied_index)
-        # k = n
-        # batch_activation = []
-        # batch_backprop = []
-        # for j in range(k):
-        #     print(f"Generating datapoint {j}/{k}   ", end="\r")
-        #     batch_indices = np.random.choice(studied_index, m)
-        #     batch_activation.append(activation_wrong[batch_indices].mean(axis=0))
-        #     batch_backprop.append(backprop_wrong[batch_indices].mean(axis=0))
-        # batch_activation = torch.stack(batch_activation)
-        # batch_backprop = torch.stack(batch_backprop)
         batch_activation = activation_wrong[studied_index]
         batch_backprop = backprop_wrong[studied_index]
         
@@ -275,25 +259,18 @@ def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cp
                 concept_engine = concept_engines[bias_label]
             else:
                 raise KeyError(f"the bias labeled {bias_label} has no attributed concept decomposer device")
+        else:
+            concept_engine = list(concept_engines.values())[0]
         results[bias_label] = {}
         for Xunbiased, Xbiased, y in bias_dataloader:
-            # y_predi = (model(X.cuda()).cpu())
-            # if output_size == 0:
-            #     output_size = len(y_predi[0])
-            #     results = {}
-            # y_predi = y_predi.argmax(dim=1)
-            # wrongly_classified = (y_predi != y)
-            # X_wrong = X[wrongly_classified]
-            # y_wrong = y[wrongly_classified]
-            # y_predi_wrong = y_predi[wrongly_classified]
             unbiased_concept_activation, biased_concept_activation, activation_difference = get_bias_concepts(Xunbiased, Xbiased, model, concept_engine, device)
             for label in y.unique():
                 label = int(label)
                 if label in results[bias_label]:
                     results[bias_label][label] = (
-                                    np.concat((results[bias_label][label][0], unbiased_concept_activation[y == label])),
-                                    np.concat((results[bias_label][label][1], biased_concept_activation[y == label])),
-                                    np.concat((results[bias_label][label][2], activation_difference[y == label].detach()))
+                                    np.concatenate((results[bias_label][label][0], unbiased_concept_activation[y == label])),
+                                    np.concatenate((results[bias_label][label][1], biased_concept_activation[y == label])),
+                                    np.concatenate((results[bias_label][label][2], activation_difference[y == label].detach()))
                                     )
                 else :
                     results[bias_label][label] = (
@@ -302,3 +279,293 @@ def gather_all_bias_results(bias_dataloaders, model, concept_engines, device="cp
                         activation_difference[y==label].detach()
                     )
     return results
+
+
+def compute_concept_bias_chi2(dataloader, concept_engines, biases, device="cpu"):
+    """
+    Computes Chi-squared test statistic and p-value between each concept and each bias.
+    
+    Performs a single loop through the dataloader and extracts latent activations for each
+    concept engine. Builds contingency tables on-the-fly without keeping activations in memory.
+    For each concept engine, computes Chi-squared test statistics between each concept 
+    (binarized as presence/absence) and each corresponding bias.
+    
+    Args:
+        dataloader: DataLoader with batches of (X, y, ...)
+        concept_engines: Dict where keys are concept engine names and values are concept 
+                        engine instances
+        biases: Dict where keys match concept_engines keys, and values are dicts of 
+               biases for that concept engine (e.g., biases[key] = {bias_name: bias_values})
+        device: Device to run computations on (default: "cpu")
+    
+    Returns:
+        chi2_results: Dict mapping each concept engine key to a dictionary of chi-squared 
+                     results for each bias. Format: {engine_key: {bias_name: {
+                         'chi2_stats': array, 'p_values': array}}}
+                     
+    Examples:
+        >>> chi2_results = compute_concept_bias_chi2(test_loader, concept_engines, biases, device="cuda")
+        >>> print(chi2_results['engine_key']['bias_name']['chi2_stats'])
+    """
+    chi2_results = {}
+    
+    # Initialize contingency table counters for all engine/bias/concept combinations
+    # Structure: {engine_key: {bias_name: {concept_idx: contingency_table}}}
+    contingency_tables = {}
+    n_concepts_per_engine = {}
+    
+    # First pass: get number of concepts for each engine (process first batch)
+    with torch.no_grad():
+        batch = next(iter(dataloader))
+        X = batch[0]
+        for engine_key, concept_engine in concept_engines.items():
+            activation = concept_engine.input_to_latent(X.to(device))
+            concept_activation = concept_engine.transform(inputs=None, activations=activation)
+            n_concepts = concept_activation.shape[1]
+            n_concepts_per_engine[engine_key] = n_concepts
+    
+    # Initialize contingency tables
+    for engine_key in concept_engines.keys():
+        contingency_tables[engine_key] = {}
+        engine_biases = biases[engine_key]
+        for bias_name in engine_biases:
+            contingency_tables[engine_key][bias_name] = {}
+            for concept_idx in range(n_concepts_per_engine[engine_key]):
+                contingency_tables[engine_key][bias_name][concept_idx] = np.zeros((2, 2))
+    
+    # Single pass through dataloader, building contingency tables
+    sample_offset = 0  # Track position in the flattened bias arrays
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(dataloader):
+            X = batch[0]
+            batch_size = X.shape[0]
+            
+            # Process each concept engine
+            for engine_key, concept_engine in concept_engines.items():
+                # Get latent activations using this concept engine
+                activation = concept_engine.input_to_latent(X.to(device))
+                
+                # Transform to concepts
+                concept_activation = concept_engine.transform(inputs=None, activations=activation)
+                
+                # Binarize concepts: 1 if activation > 0, else 0
+                concepts_binary = (concept_activation > 0).astype(int)  # (batch_size, n_concepts)
+                
+                # Get biases for this engine
+                engine_biases = biases[engine_key]
+                
+                # Update contingency tables for each bias
+                for bias_value in engine_biases:
+                    bias_present = batch[2] == bias_value  # Assuming bias labels are in order after X and y
+                    batch_bias_values = bias_present.cpu().numpy() if torch.is_tensor(bias_present) else bias_present
+                    # Update contingency table for each concept
+                    for concept_idx in range(concepts_binary.shape[1]):
+                        contingency_tables[engine_key][bias_value][concept_idx] += np.array([[((batch_bias_values == 0) & (concepts_binary[:, concept_idx] == 0)).sum(),
+                                ((batch_bias_values == 0) & (concepts_binary[:, concept_idx] == 1)).sum()],
+                            [((batch_bias_values == 1) & (concepts_binary[:, concept_idx] == 0)).sum(),
+                                ((batch_bias_values == 1) & (concepts_binary[:, concept_idx] == 1)).sum()]])
+    
+    # Compute chi-squared statistics from contingency tables
+    for engine_key in concept_engines.keys():
+        chi2_results[engine_key] = {}
+        engine_biases = biases[engine_key]
+        
+        for bias_name in engine_biases:
+            chi2_stats = np.zeros(n_concepts_per_engine[engine_key])
+            p_values = np.zeros(n_concepts_per_engine[engine_key])
+            mcc_values = np.zeros(n_concepts_per_engine[engine_key])
+            
+            for concept_idx in range(n_concepts_per_engine[engine_key]):
+                contingency_table = contingency_tables[engine_key][bias_name][concept_idx]
+                
+                # Perform chi-squared test
+                try:
+                    chi2, p_val, dof, expected = chi2_contingency(contingency_table)
+                    chi2_stats[concept_idx] = chi2
+                    p_values[concept_idx] = p_val
+                    mcc_true = []
+                    mcc_pred = []
+                    for i, row in enumerate(contingency_table):
+                        for j, count in enumerate(row):
+                            mcc_true.extend([i] * int(count))
+                            mcc_pred.extend([j] * int(count))
+                    mcc_values[concept_idx] = matthews_corrcoef(mcc_true, mcc_pred)
+                except Exception as e:
+                    # Handle cases where chi-squared test fails (e.g., insufficient data)
+                    chi2_stats[concept_idx] = np.nan
+                    p_values[concept_idx] = np.nan
+                    mcc_values[concept_idx] = np.nan
+
+            chi2_results[engine_key][bias_name] = {
+                'chi2_stats': chi2_stats,
+                'p_values': p_values,
+                'mcc_values': mcc_values
+            }
+    
+    return chi2_results
+
+
+
+
+def get_bias_estimator(data_folder, exp_name, exp_id, exp_type, concept_id, patch_id, backprop_step, bias_threshold, mode="paper"):
+    number_of_concept = concept_id
+    with open(f"{data_folder}models/{exp_name}/concepts_{exp_id}_{exp_type}_{concept_id}_{patch_id}.pkl", "rb") as f:
+        concept_parameters = pkl.load(f)
+    concept_res = concept_parameters["concept_results"][backprop_step]
+    debias_results = {"bias_vectors": [], "bias_threshold": bias_threshold, "all_values": []}
+
+    for label in concept_res.keys():
+        if mode == "ideal":
+            if "false_n" in concept_res.get(label, {}):
+                results_fn = concept_res[label]["false_n"]
+                valid_n = results_fn["concept_base"] <= 0
+                added_n = ((results_fn["concept_descent"] > 0) & valid_n).sum(axis=0)
+                valid_n = valid_n.sum(axis=0)
+            else:
+                valid_n = 0
+
+            if "false_p" in concept_res.get(label, {}):
+                results_fp = concept_res[label]["false_p"]
+                results_fp = concept_res[label]["false_p"]
+                valid_p = results_fp["concept_base"] > 0
+                removed_p = ((results_fp["concept_descent"] <= 0) & valid_p).sum(axis=0)
+                valid_p = valid_p.sum(axis=0)
+            else:
+                valid_p = 0
+                removed_p = 0
+            
+            general_valid = valid_n + valid_p
+            general_valid = general_valid + general_valid.sum()/(3*number_of_concept)
+            final_res = np.zeros(number_of_concept)
+
+            if isinstance(general_valid, int):
+                final_res = 0
+            else:
+                final_res[general_valid > 0] = (added_n + removed_p)[general_valid > 0] / general_valid[general_valid > 0]
+        
+
+        # final_res = np.array([max(false_p_res[k], false_n_res[k]) for k in range(len(false_p_res))])
+        # f = lambda x, y: 0 if (x < 0 and y < 0) else (x if y < 0 else (y if x < 0 else (x + y) / 2))
+        # final_res = np.array([f(false_p_res[k], false_n_res[k]) for k in range(len(false_p_res))])
+        if mode == "paper":
+            if "false_n" in concept_res[label]:
+                results = concept_res[label]["false_n"]
+                appearance = len(results["concept_base"])
+                base_freq_n = ((results["concept_base"] > 0).sum(axis=0))/appearance
+                descent_freq_n = (results["concept_descent"] > 0).sum(axis=0)/appearance
+            else:
+                base_freq_n = np.array([0 for i in range(number_of_concept)])
+                descent_freq_n = np.array([0 for i in range(number_of_concept)])
+            false_n_res = descent_freq_n - base_freq_n
+            false_n_res[false_n_res < 0] = 0
+            if "false_p" in concept_res[label]:
+                results = concept_res[label]["false_p"]
+                appearance = len(results["concept_base"])
+                base_freq_p = ((results["concept_base"] > 0).sum(axis=0))/appearance
+                descent_freq_p = (results["concept_descent"] > 0).sum(axis=0)/appearance
+            else: 
+                base_freq_p = np.array([0 for i in range(number_of_concept)])
+                descent_freq_p = np.array([0 for i in range(number_of_concept)])
+            false_p_res = base_freq_p - descent_freq_p
+            false_p_res[false_p_res < 0] = 0
+
+            final_res = (false_p_res + false_n_res) /2
+        # final_res = (base_freq_p + descent_freq_n) - (base_freq_n + descent_freq_p)
+
+        debias_results[label] = final_res
+        debias_results["all_values"].append(final_res)
+        for rank, value in enumerate(final_res):
+            if value > bias_threshold:
+                debias_results["bias_vectors"].append((label, rank))
+    return debias_results
+
+
+
+class ActivationDisturber():
+    def __init__(self,  layer, concepts, craft, device = "cuda"):
+        self.craft_decomposer = craft
+        self.bias_concepts = concepts
+        self.handle = layer.register_forward_hook(self._hook_function)
+        self.device = device
+        print(f"Bias concepts: {self.bias_concepts}")
+    
+    def _hook_function(self, model, input, output):
+        # print(self.bias_concepts)
+        concepts_activation = self.craft_decomposer.transform(
+            inputs=None, activations=output
+        )
+        correction = torch.Tensor(
+            concepts_activation[:, self.bias_concepts]
+            @ self.craft_decomposer.W[self.bias_concepts]
+        ).to(self.device)
+        mult = norm(output, ord=2, dim=1) / (norm(output - correction, ord=2, dim=1) + 1e-30)
+        return (output - correction) * mult.unsqueeze(1)
+
+    def __del__(self):
+        self.handle.remove()
+
+def evaluate_debiasing_impact(dataloader, g, h, concept_decomposer, bias_labels, device="cpu"):
+    ad = ActivationDisturber(layer = g[-1], concepts=bias_labels, craft=concept_decomposer, device=device)
+    n_model = nn.Sequential(g,h)
+    res = mu.test(dataloader, n_model, nn.CrossEntropyLoss(), device=device)
+    ad.handle.remove()
+    del(ad)
+    return res
+
+
+class ActivationBiaser():
+    def __init__(self, layer, concepts, craft, device="cuda"):
+        self.craft_decomposer = craft
+        self.bias_concepts = concepts
+        self.handle = layer.register_forward_hook(self._hook_function)
+        self.device = device
+    
+    def _hook_function(self, model, input, output):
+        concepts_activation = self.craft_decomposer.transform(
+            inputs=None, activations=output
+        )
+        
+        # Extract bias concepts
+        bias_concept_activation = concepts_activation[:, self.bias_concepts]
+        
+        # For each sample, compute average activation of activated bias concepts (>0)
+        activated_mask = bias_concept_activation > 0
+        sum_activated = (bias_concept_activation * activated_mask).sum(axis=1)
+        count_activated = activated_mask.sum(axis=1)
+        
+        # Average activation per sample - avoid division by zero
+        avg_activated = np.divide(
+            sum_activated,
+            count_activated,
+            where=count_activated != 0,
+            out=np.zeros_like(sum_activated)
+        )
+        
+        # Amplify bias concepts: add the average activation to each concept
+        amplified_bias_concepts = avg_activated[:, np.newaxis] * 20
+        
+        amplified_contribution = torch.Tensor(
+            amplified_bias_concepts @ self.craft_decomposer.W[self.bias_concepts]
+        ).to(self.device)
+        
+        # Modify output by adding the amplification difference
+        modified_output = output + amplified_contribution
+        
+        # Normalize to maintain L2 norm
+        mult = norm(output, ord=2, dim=1) / (norm(modified_output, ord=2, dim=1) + 1e-30)
+        return modified_output * mult.unsqueeze(1)
+
+    def __del__(self):
+        self.handle.remove()
+
+
+def evaluate_bias_amplification(dataloader, g, h, concept_decomposer, bias_labels, device="cpu"):
+    n_model = nn.Sequential(g,h)
+    res_base = mu.adjacency_test(dataloader, n_model, nn.CrossEntropyLoss(), device=device)
+    ad = ActivationBiaser(layer = g[-1], concepts=bias_labels, craft=concept_decomposer, device=device)
+    n_model = nn.Sequential(g,h)
+    res_biased = mu.adjacency_test(dataloader, n_model, nn.CrossEntropyLoss(), device=device)
+    bias_res_biased = mu.test(dataloader, n_model, nn.CrossEntropyLoss(), device=device)
+    ad.handle.remove()
+    del(ad)
+    return res_base, res_biased

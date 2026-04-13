@@ -84,6 +84,7 @@ def test(dataloader, model, loss_fn, device="cpu"):
     test_loss /= num_batches
     correct /= size
     print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    print(correctness_matrix/appearance_matrix)
     # run.log({"acc" : correct, "loss":test_loss})
 
     return correctness_matrix, appearance_matrix
@@ -96,7 +97,8 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
     test_loss, correct = 0, 0
     adjacency_matrix = []
     with torch.no_grad():
-        for X, y, y_pred in dataloader:
+        for batch_data in dataloader:
+            X, y, y_pred = batch_data[0], batch_data[1], batch_data[2]
             X, y, y_pred = X.to(device), y.to(device), y_pred.to(device)
             pred = model(X)
             pred_arg = pred.argmax(1)
@@ -107,7 +109,7 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
             correct += (pred.argmax(1) == y).type(torch.float).sum().item()
             for i in range(size_y):
                 for j in range(size_y):
-                    adjacency_matrix[i][j] += int(((pred_arg==i) & (y_pred==j)).sum())
+                    adjacency_matrix[i][j] += int(((pred_arg==i) & (y==j)).sum())
     test_loss /= num_batches
     correct /= size
     print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
@@ -116,34 +118,53 @@ def adjacency_test(dataloader, model, loss_fn, device="cpu"):
 
 
 # Model imports --> we could move to conditional statements
-from src.colour_mnist import CMNISTNeuralNetwork
+from src.colour_mnist import CMNISTNeuralNetwork, CMNISTSmallCNN
 from src.waterbird import WaterbirdsResNet18, WaterbirdsResNet50
 from src.celeba import CelebAResNet50
-from src.urbancars import UrbanCarsResNet50, UrbanCarsResNet18
 
 def get_model(model_type):
     if model_type == "MLP":
         return CMNISTNeuralNetwork()
+    elif model_type == "cnn":
+        # Small CNN for 10-class ColourMNIST — GradCAM-compatible,
+        # shared across methods (CVDB, MaskTune, uLA).
+        return CMNISTSmallCNN(num_classes=10)
     elif model_type == "resnet18":
         return WaterbirdsResNet18(num_classes = 2)
     elif model_type == "resnet50":
         return WaterbirdsResNet50(num_classes = 2)
     elif model_type == "resnetceleb":
         return CelebAResNet50()
-    elif model_type == "resneturban50":
-        return UrbanCarsResNet50()
-    elif model_type == "resneturban18":
-        return UrbanCarsResNet18()
     else:
         raise ValueError("Not a defined model being specified in model_training.py!")
 
 
-def get_optimizer(optimizer_type, model):
+def get_optimizer(optimizer_type, model, lr=1e-3):
     if optimizer_type == "sgd":
-        return torch.optim.SGD(model.parameters(), lr = 1e-3)
+        return torch.optim.SGD(model.parameters(), lr=lr, momentum=0.0, weight_decay=0.0001)
     elif optimizer_type == "adam":
-        return torch.optim.Adam(model.parameters(), lr = 1e-3)
+        return torch.optim.Adam(model.parameters(), lr=lr)
     elif optimizer_type == "adamw":
-        return torch.optim.AdamW(model.parameters(), lr = 1e-3)
+        return torch.optim.AdamW(model.parameters(), lr=lr)
     else:
         raise ValueError("Not a defined optimiser being specified in model_training.py!")
+    
+
+def _split_model(model, layer_depth):
+    """Split a CVDB model into backbone *g* and head *h*.
+
+    Returns (g, h) as ``nn.Sequential`` modules, following the same
+    convention used in ``bias_identifying.py`` and ``debiasing.py``.
+    """
+    if hasattr(model, "backbone"):
+        backbone = model.backbone
+        g = nn.Sequential(
+            *(list(backbone.children())[:-1] + [nn.Flatten(start_dim=1)])
+        )
+        h = nn.Sequential(backbone.fc)
+    else:
+        # CMNISTSmallCNN / MLP path — slice by layer_depth
+        children = list(model.children())
+        g = nn.Sequential(*children[: layer_depth - 1])
+        h = nn.Sequential(*children[layer_depth - 1 :])
+    return g, h
